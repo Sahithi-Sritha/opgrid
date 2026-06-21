@@ -2,6 +2,7 @@ import 'dotenv/config'
 import cors from 'cors'
 import express from 'express'
 import cron from 'node-cron'
+import fs from 'fs'
 import path from 'path'
 import { startScrapers, runHackathonScrapers } from './scheduler/jobs'
 import { sendDailyDigest } from './notifier/email'
@@ -25,6 +26,48 @@ const timezone = process.env.CRON_TIMEZONE || 'Asia/Kolkata'
 const schedulerEnabled = process.env.ENABLE_SCHEDULER !== 'false'
 const runInitialScrape = process.env.RUN_INITIAL_SCRAPE !== 'false'
 const runningJobs = new Set<string>()
+const frontendDirectory = path.resolve(process.cwd(), 'public')
+
+function hydrateFrontendConfig(directory: string) {
+  const replacements = new Map([
+    ['https://placeholder.supabase.co', process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || ''],
+    ['placeholder-anon-key', process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ''],
+  ])
+
+  for (const [placeholder, value] of replacements) {
+    if (!value) {
+      console.warn(`[frontend] Missing runtime value for ${placeholder}`)
+    }
+  }
+
+  const visit = (currentPath: string) => {
+    if (!fs.existsSync(currentPath)) return
+
+    for (const entry of fs.readdirSync(currentPath, { withFileTypes: true })) {
+      const entryPath = path.join(currentPath, entry.name)
+
+      if (entry.isDirectory()) {
+        visit(entryPath)
+        continue
+      }
+
+      if (!/\.(?:html|js|txt)$/.test(entry.name)) continue
+
+      const original = fs.readFileSync(entryPath, 'utf8')
+      let hydrated = original
+
+      for (const [placeholder, value] of replacements) {
+        if (value) hydrated = hydrated.split(placeholder).join(value)
+      }
+
+      if (hydrated !== original) fs.writeFileSync(entryPath, hydrated)
+    }
+  }
+
+  visit(directory)
+}
+
+hydrateFrontendConfig(frontendDirectory)
 
 const configuredOrigins = (process.env.CORS_ORIGIN || '')
   .split(',')
@@ -68,7 +111,6 @@ app.get('/health', (_req, res) => {
   })
 })
 
-const frontendDirectory = path.resolve(process.cwd(), 'public')
 app.use(express.static(frontendDirectory, { redirect: true }))
 app.get('*', (req, res, next) => {
   if (req.path.startsWith('/api/') || req.path === '/health') {
