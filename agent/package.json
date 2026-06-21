@@ -1,0 +1,59 @@
+{
+  "name": "opgrid-agent",
+  "version": "1.0.0",
+  "description": "24/7 scraping agent for OpGrid",
+  "main": "dist/index.js",
+  "scripts": {
+    "dev": "ts-node src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "postinstall": "npx playwright install chromium || true"
+  },
+  "keywords": [
+    "scraper",
+    "jobs",
+    "internships"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.17.0",
+    "@aws-sdk/client-cognito-identity-provider": "^3.1069.0",
+    "@aws-sdk/client-s3": "^3.1069.0",
+    "@google/generative-ai": "^0.24.1",
+    "@supabase/supabase-js": "^2.108.2",
+    "@types/pg": "^8.20.0",
+    "apify-client": "^2.23.4",
+    "axios": "^1.6.5",
+    "cheerio": "^1.0.0-rc.12",
+    "cors": "^2.8.6",
+    "date-fns": "^3.3.1",
+    "dotenv": "^16.4.1",
+    "express": "^4.18.2",
+    "fuse.js": "^7.0.0",
+    "multer": "^1.4.5-lts.1",
+    "node-cron": "^3.0.3",
+    "pdf-parse": "^1.1.1",
+    "pg": "^8.21.0",
+    "playwright": "^1.40.0",
+    "puppeteer": "^21.9.0",
+    "resend": "^3.1.0",
+    "telegraf": "^4.15.0"
+  },
+  "devDependencies": {
+    "@types/body-parser": "^1.19.6",
+    "@types/cors": "^2.8.19",
+    "@types/express": "^4.17.21",
+    "@types/http-errors": "^2.0.5",
+    "@types/multer": "^1.4.11",
+    "@types/node": "^20.11.5",
+    "@types/node-cron": "^3.0.11",
+    "@types/pdf-parse": "^1.1.4",
+    "@types/qs": "^6.15.1",
+    "@types/range-parser": "^1.2.7",
+    "@types/send": "^1.2.1",
+    "@types/uuid": "^10.0.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.3.3"
+  }
+}

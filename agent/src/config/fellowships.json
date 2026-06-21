@@ -1,0 +1,51 @@
+[
+  {
+    "name": "MLH Fellowship",
+    "url": "https://fellowship.mlh.io",
+    "selector": ".program-card",
+    "cycle": "rolling",
+    "description": "12-week remote internship program"
+  },
+  {
+    "name": "Google Summer of Code (GSoC)",
+    "url": "https://summerofcode.withgoogle.com/programs",
+    "selector": ".program",
+    "cycle": "annual",
+    "description": "Open source development program"
+  },
+  {
+    "name": "Outreachy",
+    "url": "https://www.outreachy.org/apply/",
+    "selector": ".internship",
+    "cycle": "biannual",
+    "description": "Paid remote internships in open source"
+  },
+  {
+    "name": "LFX Mentorship",
+    "url": "https://mentorship.lfx.linuxfoundation.org",
+    "selector": ".project-card",
+    "cycle": "quarterly",
+    "description": "Linux Foundation mentorship program"
+  },
+  {
+    "name": "Microsoft Engage",
+    "url": "https://careers.microsoft.com/students",
+    "selector": ".opportunity",
+    "cycle": "annual",
+    "description": "Microsoft student engagement program"
+  },
+  {
+    "name": "Google STEP",
+    "url": "https://buildyourfuture.withgoogle.com/programs/step",
+    "selector": ".program",
+    "cycle": "annual",
+    "description": "Student Training in Engineering Program"
+  },
+  {
+    "name": "Amazon Propel",
+    "url": "https://www.amazon.jobs/en/teams/propel",
+    "selector": ".job",
+    "cycle": "annual",
+    "description": "Amazon career development program"
+  }
+]
