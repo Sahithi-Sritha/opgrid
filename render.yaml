@@ -9,7 +9,6 @@ services:
     healthCheckPath: /health
     autoDeployTrigger: commit
     numInstances: 1
-    maxShutdownDelaySeconds: 120
     envVars:
       - key: NODE_ENV
         value: production
