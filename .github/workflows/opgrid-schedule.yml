@@ -1,0 +1,82 @@
+name: OpGrid scheduled agent
+
+on:
+  schedule:
+    # GitHub cron uses UTC. Times below map to Asia/Kolkata.
+    - cron: "17 */6 * * *" # Scrape every six hours
+    - cron: "30 2 * * *"  # Deadline checks at 08:00 IST
+    - cron: "30 3 * * *"  # Daily digest at 09:00 IST
+    - cron: "30 4 * * *"  # Follow-ups at 10:00 IST
+  workflow_dispatch:
+    inputs:
+      task:
+        description: Task to run
+        required: true
+        default: scrape
+        type: choice
+        options:
+          - scrape
+          - deadlines
+          - digest
+          - follow-ups
+          - all
+
+concurrency:
+  group: opgrid-scheduled-agent
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  run-agent:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: agent
+    env:
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      APIFY_API_TOKEN: ${{ secrets.APIFY_API_TOKEN }}
+      RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+      DAILY_DIGEST_EMAIL: ${{ secrets.DAILY_DIGEST_EMAIL }}
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Use Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: agent/package-lock.json
+
+      - name: Install dependencies
+        env:
+          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
+          PUPPETEER_SKIP_DOWNLOAD: "true"
+        run: npm ci
+
+      - name: Resolve task
+        id: task
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "value=${{ inputs.task }}" >> "$GITHUB_OUTPUT"
+          elif [ "${{ github.event.schedule }}" = "17 */6 * * *" ]; then
+            echo "value=scrape" >> "$GITHUB_OUTPUT"
+          elif [ "${{ github.event.schedule }}" = "30 2 * * *" ]; then
+            echo "value=deadlines" >> "$GITHUB_OUTPUT"
+          elif [ "${{ github.event.schedule }}" = "30 3 * * *" ]; then
+            echo "value=digest" >> "$GITHUB_OUTPUT"
+          else
+            echo "value=follow-ups" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Run scheduled task
+        run: npm run task -- "${{ steps.task.outputs.value }}"

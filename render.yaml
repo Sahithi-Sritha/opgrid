@@ -2,7 +2,7 @@ services:
   - type: web
     name: opgrid
     runtime: docker
-    plan: starter
+    plan: free
     region: singapore
     dockerfilePath: ./Dockerfile.render
     dockerContext: .
@@ -14,9 +14,9 @@ services:
       - key: NODE_ENV
         value: production
       - key: ENABLE_SCHEDULER
-        value: "true"
+        value: "false"
       - key: RUN_INITIAL_SCRAPE
-        value: "true"
+        value: "false"
       - key: CRON_TIMEZONE
         value: Asia/Kolkata
       - key: SUPABASE_URL

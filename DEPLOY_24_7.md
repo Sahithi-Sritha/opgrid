@@ -1,21 +1,17 @@
-# OpGrid on Render
+# OpGrid free deployment
 
-OpGrid deploys as one Render Docker web service:
+OpGrid uses two free services:
 
-- The Express API and scheduler stay alive in the main process.
-- The exported Next.js frontend is served by the same service.
-- Frontend API calls use the same origin, so no separate CORS URL is required.
-- The Blueprint uses one `starter` instance and one replica.
+- **Render Free web service** hosts the frontend and API.
+- **GitHub Actions** runs the agent schedule independently.
 
-## Deploy
+The Render service can sleep after 15 minutes without traffic. Opening the site wakes it in
+about a minute. Scraping does not depend on the Render process: GitHub Actions runs it directly
+against Supabase every six hours.
 
-1. Push this repository to a private GitHub repository.
-2. In Render, choose **New → Blueprint**.
-3. Select the repository and the root-level `render.yaml`.
-4. Enter the requested secret environment variables.
-5. Apply the Blueprint and wait for `/health` to pass.
+## Render
 
-Required values:
+The root `render.yaml` creates one free Docker web service. Required values:
 
 ```text
 SUPABASE_URL
@@ -25,7 +21,7 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY
 GEMINI_API_KEY
 ```
 
-Optional integrations can be left blank:
+Optional integrations:
 
 ```text
 APIFY_API_TOKEN
@@ -35,27 +31,35 @@ TELEGRAM_BOT_TOKEN
 TELEGRAM_CHAT_ID
 ```
 
-## Why Starter is selected
+The in-process scheduler is intentionally disabled on Render because free services sleep.
 
-Render's Free web services spin down after 15 minutes without inbound traffic. When that happens, the in-process scheduler stops. The Starter instance remains active, which is required for 24/7 scraping.
+## GitHub Actions secrets
 
-## Verify
-
-Open:
+Add the following repository secrets under **Settings → Secrets and variables → Actions**:
 
 ```text
-https://YOUR-SERVICE.onrender.com/health
+SUPABASE_URL
+SUPABASE_SERVICE_KEY
+GEMINI_API_KEY
+APIFY_API_TOKEN
+RESEND_API_KEY
+DAILY_DIGEST_EMAIL
+TELEGRAM_BOT_TOKEN
+TELEGRAM_CHAT_ID
 ```
 
-Confirm:
+The workflow at `.github/workflows/opgrid-schedule.yml` runs:
 
-```json
-{
-  "status": "ok",
-  "scheduler": {
-    "enabled": true
-  }
-}
-```
+- scraping every six hours;
+- deadline checks daily at 08:00 IST;
+- digest daily at 09:00 IST;
+- follow-ups daily at 10:00 IST.
 
-Then open the service root URL to use the frontend.
+The workflow can also be started manually from the GitHub Actions tab.
+
+## Free-tier caveats
+
+- Render's first page load after sleeping can take about one minute.
+- GitHub Free includes 2,000 Actions minutes per month for private repositories.
+- Render can suspend a free service that initiates unusually high outbound traffic.
+- This is autonomous and free, but it does not provide an always-responsive production SLA.
