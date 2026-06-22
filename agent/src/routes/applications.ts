@@ -1,5 +1,12 @@
 import { Router } from 'express'
 import { supabase } from '../config/supabase'
+import {
+  decodeStoredStage,
+  encodeStageForLegacyDatabase,
+  storedStageFromNotes,
+  TRACKER_STATUSES,
+  type TrackerStatus,
+} from '../services/timeline-parser'
 
 const router = Router()
 
@@ -12,7 +19,7 @@ router.get('/', async (_req, res) => {
       .order('applied_date', { ascending: false })
 
     if (error) throw error
-    res.json(data || [])
+    res.json((data || []).map(decodeStoredStage))
   } catch (error) {
     console.error('Error fetching applications:', error)
     res.status(500).json({ error: 'Failed to fetch applications' })
@@ -34,9 +41,9 @@ router.post('/', async (req, res) => {
       .maybeSingle()
 
     if (existingError) throw existingError
-    if (existing) return res.json({ ...existing, alreadyTracked: true })
+    if (existing) return res.json({ ...decodeStoredStage(existing), alreadyTracked: true })
 
-    const { data, error } = await supabase
+    let { data, error } = await supabase
       .from('applications')
       .insert({
         opportunity_id,
@@ -49,8 +56,26 @@ router.post('/', async (req, res) => {
       .select()
       .single()
 
+    if (error?.code === '23514' && TRACKER_STATUSES.includes(status as TrackerStatus)) {
+      const legacy = encodeStageForLegacyDatabase(status as TrackerStatus, notes || 'Tracked from the opportunity page')
+      const retry = await supabase
+        .from('applications')
+        .insert({
+          opportunity_id,
+          applied_date: applied_date || new Date().toISOString().slice(0, 10),
+          status: legacy.status,
+          resume_version: resume_version || null,
+          referral_name: referral_name || null,
+          notes: legacy.notes,
+        })
+        .select()
+        .single()
+      data = retry.data
+      error = retry.error
+    }
+
     if (error) throw error
-    res.status(201).json(data)
+    res.status(201).json(decodeStoredStage(data))
   } catch (error) {
     console.error('Error creating application:', error)
     res.status(500).json({ error: 'Failed to track application' })
@@ -68,7 +93,7 @@ router.patch('/:id', async (req, res) => {
       'follow_up_date',
       'notes',
     ]
-    const updates = Object.fromEntries(
+    let updates = Object.fromEntries(
       Object.entries(req.body || {}).filter(([key]) => allowedFields.includes(key)),
     )
 
@@ -76,15 +101,55 @@ router.patch('/:id', async (req, res) => {
       return res.status(400).json({ error: 'No valid fields to update' })
     }
 
-    const { data, error } = await supabase
+    const { data: existing, error: existingError } = await supabase
+      .from('applications')
+      .select('status, notes')
+      .eq('id', req.params.id)
+      .single()
+    if (existingError || !existing) throw existingError || new Error('Application not found')
+
+    const storedStage = storedStageFromNotes(existing.notes)
+    if ('notes' in updates && storedStage && !('status' in updates)) {
+      updates.notes = `${String(updates.notes || '').trim()}${updates.notes ? '\n' : ''}[[opgrid_stage:${storedStage}]]`
+    }
+    if (
+      typeof updates.status === 'string'
+      && TRACKER_STATUSES.includes(updates.status as TrackerStatus)
+      && encodeStageForLegacyDatabase(updates.status as TrackerStatus, null).status === updates.status
+      && !('notes' in updates)
+    ) {
+      updates.notes = decodeStoredStage(existing).notes
+    }
+
+    let { data, error } = await supabase
       .from('applications')
       .update(updates)
       .eq('id', req.params.id)
       .select()
       .single()
 
+    if (
+      error?.code === '23514'
+      && typeof updates.status === 'string'
+      && TRACKER_STATUSES.includes(updates.status as TrackerStatus)
+    ) {
+      const legacy = encodeStageForLegacyDatabase(
+        updates.status as TrackerStatus,
+        'notes' in updates ? String(updates.notes || '') : existing.notes,
+      )
+      updates = { ...updates, status: legacy.status, notes: legacy.notes }
+      const retry = await supabase
+        .from('applications')
+        .update(updates)
+        .eq('id', req.params.id)
+        .select()
+        .single()
+      data = retry.data
+      error = retry.error
+    }
+
     if (error || !data) throw error || new Error('Application not found')
-    res.json(data)
+    res.json(decodeStoredStage(data))
   } catch (error) {
     console.error('Error updating application:', error)
     res.status(500).json({ error: 'Failed to update application' })

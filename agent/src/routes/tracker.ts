@@ -3,6 +3,8 @@ import { GoogleGenerativeAI } from '@google/generative-ai'
 import { supabase } from '../config/supabase'
 import { getGeminiKey } from '../utils/gemini-keys'
 import {
+  decodeStoredStage,
+  encodeStageForLegacyDatabase,
   normalizeParsedTimeline,
   parseTimelinesFallback,
   TRACKER_STATUSES,
@@ -30,7 +32,7 @@ async function createTrackedItem(item: ParsedTimeline, appliedDate?: string | nu
     throw opportunityError || new Error('Failed to create opportunity')
   }
 
-  const { data: application, error: applicationError } = await supabase
+  let { data: application, error: applicationError } = await supabase
     .from('applications')
     .insert({
       opportunity_id: newOpportunity.id,
@@ -41,12 +43,28 @@ async function createTrackedItem(item: ParsedTimeline, appliedDate?: string | nu
     .select()
     .single()
 
+  if (applicationError?.code === '23514') {
+    const legacy = encodeStageForLegacyDatabase(item.status, item.notes)
+    const retry = await supabase
+      .from('applications')
+      .insert({
+        opportunity_id: newOpportunity.id,
+        status: legacy.status,
+        notes: legacy.notes,
+        applied_date: appliedDate || new Date().toISOString().slice(0, 10),
+      })
+      .select()
+      .single()
+    application = retry.data
+    applicationError = retry.error
+  }
+
   if (applicationError || !application) {
     await supabase.from('opportunities').delete().eq('id', newOpportunity.id)
     throw applicationError || new Error('Failed to create application')
   }
 
-  return { ...application, opportunities: newOpportunity }
+  return decodeStoredStage({ ...application, opportunities: newOpportunity })
 }
 
 async function extractWithGemini(text: string): Promise<ParsedTimeline[]> {

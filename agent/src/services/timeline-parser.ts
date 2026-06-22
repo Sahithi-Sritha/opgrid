@@ -31,6 +31,41 @@ export type ParsedTimeline = {
   url: string | null
 }
 
+const LEGACY_STATUSES = new Set([
+  'to_apply',
+  'applied',
+  'oa_received',
+  'oa_done',
+  'interview',
+  'rejected',
+  'offer',
+  'ghosted',
+])
+const STAGE_MARKER = /\n?\[\[opgrid_stage:([a-z_]+)\]\]\s*$/
+
+export function encodeStageForLegacyDatabase(status: TrackerStatus, notes: string | null) {
+  if (LEGACY_STATUSES.has(status)) return { status, notes }
+  const cleanNotes = (notes || '').replace(STAGE_MARKER, '').trim()
+  return {
+    status: 'applied' as TrackerStatus,
+    notes: `${cleanNotes}${cleanNotes ? '\n' : ''}[[opgrid_stage:${status}]]`,
+  }
+}
+
+export function decodeStoredStage<T extends { status?: string; notes?: string | null }>(record: T): T {
+  const match = record.notes?.match(STAGE_MARKER)
+  if (!match) return record
+  return {
+    ...record,
+    status: match[1],
+    notes: record.notes?.replace(STAGE_MARKER, '').trim() || null,
+  }
+}
+
+export function storedStageFromNotes(notes?: string | null) {
+  return notes?.match(STAGE_MARKER)?.[1] || null
+}
+
 const MONTHS: Record<string, number> = {
   jan: 0,
   january: 0,
