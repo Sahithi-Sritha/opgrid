@@ -188,6 +188,33 @@ class ApiClient {
     });
   }
 
+  async parseTimelines(text: string) {
+    return this.request<{
+      message: string;
+      parsed: Application[];
+      extraction: 'ai' | 'fallback';
+      skipped: number;
+    }>('/api/tracker/parse', {
+      method: 'POST',
+      body: JSON.stringify({ text }),
+    });
+  }
+
+  async addTrackedItem(application: {
+    company: string;
+    title: string;
+    status: string;
+    applied_date?: string | null;
+    deadline?: string | null;
+    url?: string | null;
+    notes?: string | null;
+  }) {
+    return this.request<Application>('/api/tracker/manual', {
+      method: 'POST',
+      body: JSON.stringify(application),
+    });
+  }
+
   // Notifications
   async getNotifications(unreadOnly: boolean = false) {
     const query = unreadOnly ? '?unread=true' : '';

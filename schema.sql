@@ -41,7 +41,12 @@ CREATE TABLE applications (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     opportunity_id UUID NOT NULL REFERENCES opportunities(id) ON DELETE CASCADE,
     applied_date DATE NOT NULL DEFAULT CURRENT_DATE,
-    status TEXT NOT NULL DEFAULT 'applied' CHECK (status IN ('applied', 'oa_received', 'oa_done', 'interview', 'rejected', 'offer', 'ghosted')),
+    status TEXT NOT NULL DEFAULT 'applied' CHECK (status IN (
+      'to_apply', 'registered', 'applied', 'idea_submission', 'idea_shortlisted',
+      'video_submission', 'assessment', 'oa_received', 'oa_done',
+      'prototype_building', 'hackathon_round', 'semifinalist', 'finalist',
+      'presentation', 'interview', 'rejected', 'offer', 'winner', 'ghosted'
+    )),
     resume_version TEXT,
     referral_name TEXT,
     follow_up_sent BOOLEAN DEFAULT false,

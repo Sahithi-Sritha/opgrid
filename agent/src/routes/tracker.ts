@@ -1,158 +1,160 @@
-import { Router } from 'express';
-import { GoogleGenerativeAI } from '@google/generative-ai';
-import { supabase } from '../config/supabase';
+import { Router } from 'express'
+import { GoogleGenerativeAI } from '@google/generative-ai'
+import { supabase } from '../config/supabase'
+import { getGeminiKey } from '../utils/gemini-keys'
+import {
+  normalizeParsedTimeline,
+  parseTimelinesFallback,
+  TRACKER_STATUSES,
+  type ParsedTimeline,
+} from '../services/timeline-parser'
 
-import { getGeminiKey } from '../utils/gemini-keys';
+const router = Router()
 
-const router = Router();
+async function createTrackedItem(item: ParsedTimeline, appliedDate?: string | null) {
+  const opportunity = {
+    title: item.title || 'Unknown Opportunity',
+    company: item.company,
+    deadline: item.deadline || null,
+    url: item.url || `pasted-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`,
+    source: 'career_page',
+  }
+
+  const { data: newOpportunity, error: opportunityError } = await supabase
+    .from('opportunities')
+    .insert(opportunity)
+    .select('*')
+    .single()
+
+  if (opportunityError || !newOpportunity) {
+    throw opportunityError || new Error('Failed to create opportunity')
+  }
+
+  const { data: application, error: applicationError } = await supabase
+    .from('applications')
+    .insert({
+      opportunity_id: newOpportunity.id,
+      status: item.status,
+      notes: item.notes || null,
+      applied_date: appliedDate || new Date().toISOString().slice(0, 10),
+    })
+    .select()
+    .single()
+
+  if (applicationError || !application) {
+    await supabase.from('opportunities').delete().eq('id', newOpportunity.id)
+    throw applicationError || new Error('Failed to create application')
+  }
+
+  return { ...application, opportunities: newOpportunity }
+}
+
+async function extractWithGemini(text: string): Promise<ParsedTimeline[]> {
+  const apiKey = getGeminiKey()
+  if (!apiKey) throw new Error('Gemini is not configured')
+
+  const model = new GoogleGenerativeAI(apiKey).getGenerativeModel({
+    model: 'gemini-2.5-flash',
+    generationConfig: { responseMimeType: 'application/json' },
+  })
+
+  const prompt = `Extract every job, internship, fellowship, competition, or hackathon timeline from the text below.
+Return a JSON array. Each object must contain:
+- company: organizer or company
+- title: opportunity name
+- deadline: YYYY-MM-DD or null
+- status: exactly one of ${TRACKER_STATUSES.join(', ')}
+- notes: useful timeline context or null
+- url: full URL or null
+
+Use the current date 2026-06-22 and infer missing years sensibly. Preserve hackathon stages such as idea_submission and video_submission.
+
+TEXT:
+${text}`
+
+  const response = await model.generateContent(prompt)
+  const raw = response.response.text().replace(/```(?:json)?|```/g, '').trim()
+  const start = raw.indexOf('[')
+  const end = raw.lastIndexOf(']')
+  const json = start >= 0 && end > start ? raw.slice(start, end + 1) : raw
+  const decoded = JSON.parse(json)
+  const values = Array.isArray(decoded) ? decoded : [decoded]
+  return values.map(normalizeParsedTimeline).filter((item): item is ParsedTimeline => Boolean(item))
+}
 
 router.post('/parse', async (req, res) => {
-  const { text } = req.body;
+  const text = typeof req.body?.text === 'string' ? req.body.text.trim() : ''
+  if (!text) return res.status(400).json({ error: 'Paste some timeline text first.' })
+  if (text.length > 25_000) return res.status(400).json({ error: 'Timeline text is too long. Keep it under 25,000 characters.' })
 
-  if (!text || typeof text !== 'string') {
-    return res.status(400).json({ error: 'Valid text is required' });
-  }
+  let parsed: ParsedTimeline[] = []
+  let extraction: 'ai' | 'fallback' = 'ai'
 
   try {
-    const genAI = new GoogleGenerativeAI(getGeminiKey());
-    const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
+    parsed = await extractWithGemini(text)
+  } catch (error) {
+    extraction = 'fallback'
+    console.warn('Gemini timeline extraction failed; using local parser:', error)
+  }
 
-    const prompt = `Analyze the following unstructured text and extract any opportunities, deadlines, and timelines mentioned.
-For each opportunity found, extract:
-1. company (string)
-2. title (string, default to "Unknown Position" if not specified)
-3. deadline (string in YYYY-MM-DD format, or null if not specified. Use year 2026 if year is not specified.)
-4. status (string: choose from 'to_apply', 'applied', 'oa_received', 'oa_done', 'interview', 'rejected', 'offer'. Infer based on context. If someone says "applied" or "already applied", use 'applied'. If it's just a deadline/timeline, use 'to_apply')
-5. notes (string, any extra context or timeline details, or null)
-6. url (string, any link/URL mentioned for this opportunity, or null)
+  if (parsed.length === 0) {
+    extraction = 'fallback'
+    parsed = parseTimelinesFallback(text, new Date('2026-06-22T00:00:00Z'))
+  }
 
-Extract EVERY single opportunity mentioned. Do NOT skip any. Even single mentions like "Adobe Student Insider apply 19th June" should be extracted.
+  if (parsed.length === 0) {
+    return res.status(422).json({
+      error: 'I could not find an opportunity. Try one item per line, for example: "Adobe — Student Insider — apply by 30 June 2026".',
+    })
+  }
 
-Respond ONLY with a valid JSON array of objects. No markdown formatting or code blocks.
-Example: [{"company":"Google","title":"SWE Intern","deadline":"2026-10-31","status":"to_apply","notes":"Application opens Oct 1","url":null}]
-
-Text to analyze:
-"""
-${text}
-"""`;
-
-    const result = await model.generateContent(prompt);
-    const responseText = result.response.text();
-    const cleanedText = responseText.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
-    
-    let parsedData;
+  const created = []
+  const failures: string[] = []
+  for (const item of parsed) {
     try {
-      parsedData = JSON.parse(cleanedText);
-    } catch (e) {
-      console.error("Failed to parse Gemini output:", cleanedText);
-      return res.status(500).json({ error: 'AI returned invalid data format' });
+      created.push(await createTrackedItem(item))
+    } catch (error: any) {
+      console.error('Failed to save parsed timeline:', error)
+      failures.push(`${item.company}: ${error?.message || 'save failed'}`)
     }
+  }
 
-    if (!Array.isArray(parsedData)) {
-      parsedData = [parsedData];
-    }
+  if (created.length === 0) {
+    return res.status(500).json({
+      error: failures[0] || 'The opportunities were extracted but could not be saved.',
+    })
+  }
 
-    const createdApps = [];
+  res.json({
+    message: `Added ${created.length} tracked ${created.length === 1 ? 'item' : 'items'}.`,
+    parsed: created,
+    extraction,
+    skipped: failures.length,
+  })
+})
 
-    for (const item of parsedData) {
-      if (!item.company) continue;
+router.post('/manual', async (req, res) => {
+  try {
+    const company = String(req.body?.company || '').trim()
+    const title = String(req.body?.title || '').trim()
+    if (!company || !title) return res.status(400).json({ error: 'Company and opportunity title are required.' })
 
-      // 1. Insert opportunity
-      const oppData: any = {
-        title: item.title || 'Unknown Position',
-        company: item.company,
-        deadline: item.deadline || null,
-        url: item.url || 'pasted-' + Date.now() + '-' + Math.random().toString(36).substr(2, 9),
-        source: 'career_page'
-      };
+    const item = normalizeParsedTimeline({
+      company,
+      title,
+      deadline: req.body?.deadline || null,
+      status: req.body?.status || 'to_apply',
+      notes: req.body?.notes || null,
+      url: req.body?.url || null,
+    })
+    if (!item) return res.status(400).json({ error: 'Invalid tracking details.' })
 
-      const { data: newOpp, error: oppError } = await supabase
-        .from('opportunities')
-        .insert(oppData)
-        .select('id')
-        .single();
-
-      if (oppError || !newOpp) {
-        console.error("Failed to insert opportunity:", oppError);
-        continue;
-      }
-
-      // 2. Insert application
-      const appData = {
-        opportunity_id: newOpp.id,
-        status: item.status || 'to_apply',
-        notes: item.notes || null,
-        applied_date: new Date().toISOString()
-      };
-
-      const { data: newApp, error: appError } = await supabase
-        .from('applications')
-        .insert(appData)
-        .select()
-        .single();
-
-      if (appError) {
-        console.error("Failed to insert application:", appError);
-      } else {
-        createdApps.push({ ...newApp, opportunities: { ...oppData, id: newOpp.id } });
-      }
-    }
-
-    res.status(200).json({ message: 'Successfully parsed and tracked', parsed: createdApps });
+    const application = await createTrackedItem(item, req.body?.applied_date || null)
+    res.status(201).json(application)
   } catch (error: any) {
-    console.error('Error parsing timelines:', error);
-    if (error.status === 429) {
-      return res.status(429).json({ error: 'Gemini API Rate Limit Exceeded. Please wait a minute and try again.' });
-    }
-    res.status(500).json({ error: 'Internal server error' });
+    console.error('Failed to add tracked item manually:', error)
+    res.status(500).json({ error: error?.message || 'Failed to add tracked item.' })
   }
-});
+})
 
-// Update application status, notes, etc.
-router.patch('/application/:id', async (req, res) => {
-  const { id } = req.params;
-  const { status, notes, referral_name } = req.body;
-
-  const updates: any = {};
-  if (status !== undefined) updates.status = status;
-  if (notes !== undefined) updates.notes = notes;
-  if (referral_name !== undefined) updates.referral_name = referral_name;
-
-  const { data, error } = await supabase
-    .from('applications')
-    .update(updates)
-    .eq('id', id)
-    .select()
-    .single();
-
-  if (error) {
-    return res.status(500).json({ error: error.message });
-  }
-  res.json(data);
-});
-
-// Update opportunity details (company, title, deadline, url)
-router.patch('/opportunity/:id', async (req, res) => {
-  const { id } = req.params;
-  const { company, title, deadline, url } = req.body;
-
-  const updates: any = {};
-  if (company !== undefined) updates.company = company;
-  if (title !== undefined) updates.title = title;
-  if (deadline !== undefined) updates.deadline = deadline || null;
-  if (url !== undefined) updates.url = url;
-
-  const { data, error } = await supabase
-    .from('opportunities')
-    .update(updates)
-    .eq('id', id)
-    .select()
-    .single();
-
-  if (error) {
-    return res.status(500).json({ error: error.message });
-  }
-  res.json(data);
-});
-
-export default router;
+export default router
