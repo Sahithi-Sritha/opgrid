@@ -19,6 +19,7 @@ import sourcesRoutes from './routes/sources'
 import trackerRoutes from './routes/tracker'
 import opportunityRoutes from './routes/opportunities'
 import applicationRoutes from './routes/applications'
+import dashboardRoutes from './routes/dashboard'
 
 const app = express()
 const port = Number.parseInt(process.env.PORT || '3001', 10)
@@ -95,6 +96,7 @@ app.use('/api/scrapers', scraperHealthRoutes)
 app.use('/api/opportunities', opportunityRoutes)
 app.use('/api/opportunities', deduplicationRoutes)
 app.use('/api/applications', applicationRoutes)
+app.use('/api/dashboard', dashboardRoutes)
 app.use('/api/sources', sourcesRoutes)
 app.use('/api/tracker', trackerRoutes)
 

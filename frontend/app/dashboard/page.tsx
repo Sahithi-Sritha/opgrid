@@ -1,146 +1,158 @@
 'use client'
 
-import { useEffect, useState } from 'react'
-import { supabase } from '@/lib/supabase'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { CheckCircle, Clock, RefreshCw, Target, TrendingUp } from 'lucide-react'
+import { apiClient, type DashboardData, type DashboardDeadline } from '@/lib/api-client'
 import { DeadlineCard } from '@/components/DeadlineCard'
 import { StatsCard } from '@/components/StatsCard'
 import { ActivityFeed } from '@/components/ActivityFeed'
 import { DeadlineCalendar } from '@/components/DeadlineCalendar'
-import { TrendingUp, CheckCircle, Clock, Target } from 'lucide-react'
-import { apiClient } from '@/lib/api-client'
 
 export default function DashboardPage() {
-  const [urgentDeadlines, setUrgentDeadlines] = useState<any[]>([])
-  const [stats, setStats] = useState<any>(null)
-  const [sparklineData, setSparklineData] = useState<any[]>([])
+  const [dashboard, setDashboard] = useState<DashboardData | null>(null)
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [savingDeadline, setSavingDeadline] = useState<string | null>(null)
 
-  useEffect(() => {
-    loadDashboardData()
+  const loadDashboard = useCallback(async () => {
+    setLoading(true)
+    setError(null)
+    const { data, error: requestError } = await apiClient.getDashboard()
+    if (requestError) setError(requestError.message)
+    else setDashboard(data)
+    setLoading(false)
   }, [])
 
-  const loadDashboardData = async () => {
-    try {
-      // Get urgent deadlines
-      const { data: deadlines } = await supabase
-        .rpc('get_urgent_deadlines', { days_ahead: 14 })
+  useEffect(() => {
+    void loadDashboard()
+  }, [loadDashboard])
 
-      setUrgentDeadlines(deadlines || [])
+  const urgentDeadlines = useMemo(
+    () => (dashboard?.deadlines || [])
+      .filter(deadline => deadline.days_remaining >= 0 && deadline.days_remaining <= 14)
+      .slice(0, 12),
+    [dashboard],
+  )
 
-      // Get dashboard stats
-      const { data: statsData } = await supabase.rpc('get_dashboard_stats')
-      setStats(statsData)
-
-      // Get sparkline data
-      const { data: sparkline } = await supabase.rpc('get_scraping_sparkline', { days: 7 })
-      setSparklineData(sparkline || [])
-
-    } catch (error) {
-      console.error('Dashboard load error:', error)
-    } finally {
-      setLoading(false)
-    }
+  const handleApplied = async (deadline: DashboardDeadline) => {
+    const { error: requestError } = await apiClient.markApplied(deadline.opportunity_id)
+    if (requestError) setError(requestError.message)
+    else await loadDashboard()
   }
 
-  const handleSnooze = async (opportunityId: string) => {
-    const tomorrow = new Date()
-    tomorrow.setDate(tomorrow.getDate() + 1)
-
-    await supabase
-      .from('opportunities')
-      .update({ seen_at: tomorrow.toISOString() })
-      .eq('id', opportunityId)
-
-    // Remove from urgent list
-    setUrgentDeadlines(prev => prev.filter(d => d.id !== opportunityId))
+  const handleComplete = async (deadline: DashboardDeadline) => {
+    if (!deadline.application_id || !deadline.deadline_id) return
+    setSavingDeadline(deadline.id)
+    const { error: requestError } = await apiClient.updateApplicationDeadline(
+      deadline.application_id,
+      deadline.deadline_id,
+      { completed: true },
+    )
+    if (requestError) setError(requestError.message)
+    else await loadDashboard()
+    setSavingDeadline(null)
   }
 
-  const handleApplied = async (opportunityId: string) => {
-    await apiClient.markApplied(opportunityId)
-
-    // Refresh dashboard
-    loadDashboardData()
-  }
-
-  if (loading) {
+  if (loading && !dashboard) {
     return (
-      <div className="flex items-center justify-center h-screen">
-        <div className="text-muted-foreground">Loading dashboard...</div>
+      <div className="flex min-h-[70vh] items-center justify-center">
+        <div className="flex items-center gap-2 text-muted-foreground">
+          <RefreshCw className="h-4 w-4 animate-spin" />
+          Loading your command center…
+        </div>
       </div>
     )
   }
 
+  const stats = dashboard?.stats
+
   return (
-    <div className="p-8 max-w-7xl mx-auto">
-      {/* Page Title */}
-      <div className="mb-6">
-        <h1 className="text-3xl font-bold mb-2">Command Center</h1>
-        <p className="text-muted-foreground">
-          Your opportunity tracking dashboard
-        </p>
-      </div>
-
-      {/* Urgency Strip - Horizontal Scrollable */}
-      <div className="mb-8">
-        <h2 className="text-lg font-semibold mb-3">⚡ Urgent Deadlines</h2>
-        <div className="flex gap-4 overflow-x-auto pb-4 scrollbar-hide">
-          {urgentDeadlines.length === 0 ? (
-            <div className="text-sm text-muted-foreground">
-              No urgent deadlines in the next 14 days
-            </div>
-          ) : (
-            urgentDeadlines.map(deadline => (
-              <DeadlineCard
-                key={deadline.id}
-                deadline={deadline}
-                onSnooze={() => handleSnooze(deadline.id)}
-                onApplied={() => handleApplied(deadline.id)}
-              />
-            ))
-          )}
+    <div className="mx-auto max-w-7xl p-4 sm:p-8">
+      <div className="mb-7 flex flex-col justify-between gap-4 sm:flex-row sm:items-start">
+        <div>
+          <h1 className="mb-2 text-3xl font-bold">Command Center</h1>
+          <p className="text-muted-foreground">
+            Every application, milestone, and deadline in one place.
+          </p>
         </div>
+        <button
+          onClick={() => void loadDashboard()}
+          disabled={loading}
+          className="inline-flex items-center justify-center gap-2 rounded-lg border bg-background px-4 py-2 font-medium transition hover:bg-muted disabled:opacity-60"
+        >
+          <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+          Refresh
+        </button>
       </div>
 
-      {/* Stats Row */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
+      {error && (
+        <div className="mb-6 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
+          {error}
+        </div>
+      )}
+
+      <div className="mb-8 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <StatsCard
           title="Total Opportunities"
           value={stats?.total_opportunities || 0}
-          icon={<TrendingUp className="w-5 h-5" />}
-          sparkline={sparklineData}
+          icon={<TrendingUp className="h-5 w-5" />}
+          sparkline={dashboard?.sparkline}
           color="blue"
         />
         <StatsCard
-          title="Applied This Week"
+          title="Tracked This Week"
           value={stats?.applications_this_week || 0}
-          icon={<CheckCircle className="w-5 h-5" />}
+          icon={<CheckCircle className="h-5 w-5" />}
           color="green"
         />
         <StatsCard
           title="Deadlines Next 7 Days"
-          value={stats?.deadlines_next_week || 0}
-          icon={<Clock className="w-5 h-5" />}
-          color={stats?.deadlines_next_week > 3 ? 'red' : 'amber'}
-          alert={stats?.deadlines_next_week > 3}
+          value={stats?.deadlines_next_7_days || 0}
+          icon={<Clock className="h-5 w-5" />}
+          color={(stats?.deadlines_next_7_days || 0) > 3 ? 'red' : 'amber'}
+          alert={(stats?.deadlines_next_7_days || 0) > 3}
         />
         <StatsCard
           title="Active Pipeline"
           value={stats?.active_pipeline || 0}
-          icon={<Target className="w-5 h-5" />}
+          icon={<Target className="h-5 w-5" />}
           color="purple"
         />
       </div>
 
-      {/* Two Column Layout */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        {/* Activity Feed - Takes 2 columns */}
-        <div className="lg:col-span-2">
-          <ActivityFeed />
+      <section className="mb-8">
+        <div className="mb-3 flex items-end justify-between gap-4">
+          <div>
+            <h2 className="text-xl font-semibold">Upcoming deadlines</h2>
+            <p className="text-sm text-muted-foreground">The next 14 days across all tracked milestones.</p>
+          </div>
+          <div className="text-sm text-muted-foreground">{urgentDeadlines.length} upcoming</div>
         </div>
+        {urgentDeadlines.length === 0 ? (
+          <div className="rounded-2xl border border-dashed p-8 text-center text-sm text-muted-foreground">
+            Nothing due in the next 14 days. A rare and beautiful sight.
+          </div>
+        ) : (
+          <div className="flex gap-4 overflow-x-auto pb-4">
+            {urgentDeadlines.map(deadline => (
+              <DeadlineCard
+                key={deadline.id}
+                deadline={deadline}
+                saving={savingDeadline === deadline.id}
+                onApplied={() => void handleApplied(deadline)}
+                onComplete={() => void handleComplete(deadline)}
+              />
+            ))}
+          </div>
+        )}
+      </section>
 
-        {/* Deadline Calendar - Takes 1 column */}
-        <div>
-          <DeadlineCalendar deadlines={urgentDeadlines} />
+      <div className="grid grid-cols-1 gap-8 lg:grid-cols-5">
+        <div className="lg:col-span-3">
+          <DeadlineCalendar deadlines={dashboard?.deadlines || []} />
+        </div>
+        <div className="lg:col-span-2">
+          <ActivityFeed activities={dashboard?.activities || []} />
         </div>
       </div>
     </div>

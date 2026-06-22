@@ -22,10 +22,18 @@ export const TRACKER_STATUSES = [
 
 export type TrackerStatus = typeof TRACKER_STATUSES[number]
 
+export type ApplicationDeadline = {
+  id: string
+  label: string
+  due_date: string
+  completed: boolean
+}
+
 export type ParsedTimeline = {
   company: string
   title: string
   deadline: string | null
+  deadlines?: Array<Pick<ApplicationDeadline, 'label' | 'due_date'>>
   status: TrackerStatus
   notes: string | null
   url: string | null
@@ -41,29 +49,81 @@ const LEGACY_STATUSES = new Set([
   'offer',
   'ghosted',
 ])
-const STAGE_MARKER = /\n?\[\[opgrid_stage:([a-z_]+)\]\]\s*$/
+const STAGE_MARKER = /\n?\[\[opgrid_stage:([a-z_]+)\]\]/g
+const STAGE_EXTRACTOR = /\[\[opgrid_stage:([a-z_]+)\]\]/
+const DEADLINES_MARKER = /\n?\[\[opgrid_deadlines:([A-Za-z0-9_-]+)\]\]/g
+const DEADLINES_EXTRACTOR = /\[\[opgrid_deadlines:([A-Za-z0-9_-]+)\]\]/
+
+function decodeDeadlines(notes?: string | null): ApplicationDeadline[] {
+  const encoded = notes?.match(DEADLINES_EXTRACTOR)?.[1]
+  if (!encoded) return []
+  try {
+    const decoded = JSON.parse(Buffer.from(encoded, 'base64url').toString('utf8'))
+    if (!Array.isArray(decoded)) return []
+    return decoded.filter(item =>
+      item
+      && typeof item.id === 'string'
+      && typeof item.label === 'string'
+      && /^\d{4}-\d{2}-\d{2}$/.test(item.due_date),
+    ).map(item => ({
+      id: item.id,
+      label: item.label.trim() || 'Deadline',
+      due_date: item.due_date,
+      completed: Boolean(item.completed),
+    }))
+  } catch {
+    return []
+  }
+}
+
+export function readApplicationMetadata(notes?: string | null) {
+  return {
+    notes: (notes || '').replace(STAGE_MARKER, '').replace(DEADLINES_MARKER, '').trim() || null,
+    stage: notes?.match(STAGE_EXTRACTOR)?.[1] || null,
+    deadlines: decodeDeadlines(notes),
+  }
+}
+
+export function writeApplicationMetadata(
+  notes: string | null,
+  stage: string | null,
+  deadlines: ApplicationDeadline[],
+) {
+  const cleanNotes = readApplicationMetadata(notes).notes || ''
+  const markers: string[] = []
+  if (stage) markers.push(`[[opgrid_stage:${stage}]]`)
+  if (deadlines.length > 0) {
+    markers.push(`[[opgrid_deadlines:${Buffer.from(JSON.stringify(deadlines)).toString('base64url')}]]`)
+  }
+  return [cleanNotes, ...markers].filter(Boolean).join('\n') || null
+}
 
 export function encodeStageForLegacyDatabase(status: TrackerStatus, notes: string | null) {
-  if (LEGACY_STATUSES.has(status)) return { status, notes }
-  const cleanNotes = (notes || '').replace(STAGE_MARKER, '').trim()
+  const metadata = readApplicationMetadata(notes)
+  if (LEGACY_STATUSES.has(status)) {
+    return {
+      status,
+      notes: writeApplicationMetadata(metadata.notes, null, metadata.deadlines),
+    }
+  }
   return {
     status: 'applied' as TrackerStatus,
-    notes: `${cleanNotes}${cleanNotes ? '\n' : ''}[[opgrid_stage:${status}]]`,
+    notes: writeApplicationMetadata(metadata.notes, status, metadata.deadlines),
   }
 }
 
 export function decodeStoredStage<T extends { status?: string; notes?: string | null }>(record: T): T {
-  const match = record.notes?.match(STAGE_MARKER)
-  if (!match) return record
+  const metadata = readApplicationMetadata(record.notes)
   return {
     ...record,
-    status: match[1],
-    notes: record.notes?.replace(STAGE_MARKER, '').trim() || null,
-  }
+    status: metadata.stage || record.status,
+    notes: metadata.notes,
+    deadlines: metadata.deadlines,
+  } as T
 }
 
 export function storedStageFromNotes(notes?: string | null) {
-  return notes?.match(STAGE_MARKER)?.[1] || null
+  return readApplicationMetadata(notes).stage
 }
 
 const MONTHS: Record<string, number> = {
@@ -156,7 +216,7 @@ export function inferStatus(text: string): TrackerStatus {
   if (/\bghosted\b/.test(value)) return 'ghosted'
   if (/\b(finalist|grand finale|final round)\b/.test(value)) return 'finalist'
   if (/\b(semi[- ]?final|semifinal)\b/.test(value)) return 'semifinalist'
-  if (/\b(presentation|pitching|demo day)\b/.test(value)) return 'presentation'
+  if (/\b(presentation|pitch(?:ing)?|demo day)\b/.test(value)) return 'presentation'
   if (/\b(prototype|building phase|build phase)\b/.test(value)) return 'prototype_building'
   if (/\b(hackathon round|onsite hackathon|offline hackathon)\b/.test(value)) return 'hackathon_round'
   if (/\b(video submission|submit(?:ted)? (?:a )?video|video round)\b/.test(value)) return 'video_submission'
@@ -171,6 +231,42 @@ export function inferStatus(text: string): TrackerStatus {
   if (/\b(registered|registration complete)\b/.test(value)) return 'registered'
   if (/\b(applied|application submitted|submitted application)\b/.test(value)) return 'applied'
   return 'to_apply'
+}
+
+const STATUS_LABELS: Record<TrackerStatus, string> = {
+  to_apply: 'Application deadline',
+  registered: 'Registration deadline',
+  applied: 'Application deadline',
+  idea_submission: 'Idea submission',
+  idea_shortlisted: 'Idea shortlist',
+  video_submission: 'Video submission',
+  assessment: 'Assessment',
+  oa_received: 'Online assessment',
+  oa_done: 'Online assessment',
+  prototype_building: 'Prototype submission',
+  hackathon_round: 'Hackathon round',
+  semifinalist: 'Semifinal',
+  finalist: 'Final',
+  presentation: 'Presentation / pitch',
+  interview: 'Interview',
+  rejected: 'Decision',
+  offer: 'Offer response',
+  winner: 'Winner announcement',
+  ghosted: 'Follow-up',
+}
+
+function extractTimelineDeadlines(text: string, now: Date) {
+  const segments = text.split(/\s*(?:;|,(?=\s*[A-Za-z]))\s*/).filter(Boolean)
+  const deadlines = segments.flatMap(segment => {
+    const dueDate = extractDate(segment, now)
+    if (!dueDate) return []
+    return [{
+      label: STATUS_LABELS[inferStatus(segment)],
+      due_date: dueDate,
+    }]
+  })
+  const unique = new Map(deadlines.map(deadline => [`${deadline.label}|${deadline.due_date}`, deadline]))
+  return Array.from(unique.values())
 }
 
 function cleanLead(text: string) {
@@ -215,10 +311,12 @@ export function parseTimelinesFallback(text: string, now = new Date()): ParsedTi
     .map(line => {
       const url = line.match(/https?:\/\/[^\s<>"')\]]+/i)?.[0] || null
       const { company, title } = inferCompanyAndTitle(line)
+      const deadlines = extractTimelineDeadlines(line, now)
       return {
         company,
         title: title || 'Unknown Opportunity',
-        deadline: extractDate(line, now),
+        deadline: deadlines[0]?.due_date || extractDate(line, now),
+        deadlines,
         status: inferStatus(line),
         notes: line,
         url,
@@ -236,12 +334,31 @@ export function parseTimelinesFallback(text: string, now = new Date()): ParsedTi
 export function normalizeParsedTimeline(value: any): ParsedTimeline | null {
   if (!value || typeof value !== 'object' || !String(value.company || '').trim()) return null
   const requestedStatus = String(value.status || 'to_apply') as TrackerStatus
+  const deadlines = Array.isArray(value.deadlines)
+    ? value.deadlines
+      .filter((deadline: any) =>
+        deadline
+        && typeof deadline.label === 'string'
+        && typeof deadline.due_date === 'string'
+        && /^\d{4}-\d{2}-\d{2}$/.test(deadline.due_date),
+      )
+      .map((deadline: any) => ({
+        label: deadline.label.trim() || 'Deadline',
+        due_date: deadline.due_date,
+      }))
+    : []
+  const primaryDeadline = typeof value.deadline === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value.deadline)
+    ? value.deadline
+    : deadlines[0]?.due_date || null
   return {
     company: String(value.company).trim(),
     title: String(value.title || 'Unknown Opportunity').trim(),
-    deadline: typeof value.deadline === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value.deadline)
-      ? value.deadline
-      : null,
+    deadline: primaryDeadline,
+    deadlines: deadlines.length > 0
+      ? deadlines
+      : primaryDeadline
+        ? [{ label: STATUS_LABELS[requestedStatus] || 'Deadline', due_date: primaryDeadline }]
+        : [],
     status: TRACKER_STATUSES.includes(requestedStatus) ? requestedStatus : inferStatus(String(value.notes || '')),
     notes: value.notes ? String(value.notes).trim() : null,
     url: typeof value.url === 'string' && /^https?:\/\//i.test(value.url) ? value.url.trim() : null,

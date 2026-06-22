@@ -1,8 +1,22 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { ClipboardPaste, Loader2, Plus, Trash2, X } from 'lucide-react'
-import { apiClient, type Application, type Opportunity } from '@/lib/api-client'
+import {
+  CalendarDays,
+  CheckCircle2,
+  Circle,
+  ClipboardPaste,
+  Loader2,
+  Plus,
+  Trash2,
+  X,
+} from 'lucide-react'
+import {
+  apiClient,
+  type Application,
+  type ApplicationDeadline,
+  type Opportunity,
+} from '@/lib/api-client'
 
 type ApplicationWithOpportunity = Application & {
   opportunities: Opportunity
@@ -54,6 +68,9 @@ export default function TrackerPage() {
   const [editingCell, setEditingCell] = useState<{ appId: string; field: string } | null>(null)
   const [editValue, setEditValue] = useState('')
   const [savingId, setSavingId] = useState<string | null>(null)
+  const [deadlineAppId, setDeadlineAppId] = useState<string | null>(null)
+  const [deadlineForm, setDeadlineForm] = useState({ label: '', due_date: '' })
+  const [savingDeadline, setSavingDeadline] = useState<string | null>(null)
 
   const loadApplications = async () => {
     setLoading(true)
@@ -181,15 +198,72 @@ export default function TrackerPage() {
     }
   }
 
+  const updateApplicationFromResponse = (appId: string, data: Application | null) => {
+    if (!data) return
+    setApplications(current => current.map(application =>
+      application.id === appId ? { ...application, ...data } : application,
+    ))
+  }
+
+  const addDeadline = async (event: React.FormEvent) => {
+    event.preventDefault()
+    if (!deadlineAppId || !deadlineForm.label.trim() || !deadlineForm.due_date) return
+    setSavingDeadline('new')
+    const { data, error } = await apiClient.addApplicationDeadline(deadlineAppId, {
+      label: deadlineForm.label.trim(),
+      due_date: deadlineForm.due_date,
+    })
+    if (error) setNotice({ type: 'error', text: error.message })
+    else {
+      updateApplicationFromResponse(deadlineAppId, data)
+      setDeadlineForm({ label: '', due_date: '' })
+    }
+    setSavingDeadline(null)
+  }
+
+  const toggleDeadline = async (appId: string, deadline: ApplicationDeadline) => {
+    setSavingDeadline(deadline.id)
+    const { data, error } = await apiClient.updateApplicationDeadline(appId, deadline.id, {
+      completed: !deadline.completed,
+    })
+    if (error) setNotice({ type: 'error', text: error.message })
+    else updateApplicationFromResponse(appId, data)
+    setSavingDeadline(null)
+  }
+
+  const removeDeadline = async (appId: string, deadlineId: string) => {
+    setSavingDeadline(deadlineId)
+    const { data, error } = await apiClient.deleteApplicationDeadline(appId, deadlineId)
+    if (error) setNotice({ type: 'error', text: error.message })
+    else updateApplicationFromResponse(appId, data)
+    setSavingDeadline(null)
+  }
+
   const getStatusColor = (status: string) =>
     STATUS_OPTIONS.find(option => option.value === status)?.color || 'bg-gray-100 text-gray-800'
 
+  const pendingDeadlines = (application: ApplicationWithOpportunity) =>
+    (application.deadlines || [])
+      .filter(deadline => !deadline.completed)
+      .sort((a, b) => a.due_date.localeCompare(b.due_date))
+
+  const nextDeadline = (application: ApplicationWithOpportunity) =>
+    pendingDeadlines(application)[0]
+    || (application.opportunities.deadline
+      ? {
+        id: 'original',
+        label: 'Application deadline',
+        due_date: application.opportunities.deadline,
+        completed: false,
+      }
+      : null)
+
   const sortedApplications = [...applications].sort((a, b) => {
     const valueA = sortBy === 'deadline'
-      ? a.opportunities.deadline || '9999-12-31'
+      ? nextDeadline(a)?.due_date || '9999-12-31'
       : a.applied_date || ''
     const valueB = sortBy === 'deadline'
-      ? b.opportunities.deadline || '9999-12-31'
+      ? nextDeadline(b)?.due_date || '9999-12-31'
       : b.applied_date || ''
     return valueA === valueB ? 0 : (valueA < valueB ? (sortAsc ? -1 : 1) : (sortAsc ? 1 : -1))
   })
@@ -326,15 +400,36 @@ export default function TrackerPage() {
                       application.applied_date ? new Date(application.applied_date).toLocaleDateString() : undefined,
                     )}
                   </td>
-                  <td className="p-4 text-sm font-medium text-orange-600">
-                    {renderEditableCell(
-                      application.id,
-                      'deadline',
-                      application.opportunities.deadline || '',
-                      application.opportunities.deadline
-                        ? new Date(application.opportunities.deadline).toLocaleDateString()
-                        : undefined,
-                    )}
+                  <td className="p-4 text-sm">
+                    {(() => {
+                      const deadline = nextDeadline(application)
+                      const pendingCount = pendingDeadlines(application).length
+                      return (
+                        <button
+                          onClick={() => {
+                            setDeadlineAppId(application.id)
+                            setDeadlineForm({ label: '', due_date: '' })
+                          }}
+                          className="rounded-lg px-2 py-1 text-left transition hover:bg-orange-50"
+                        >
+                          {deadline ? (
+                            <>
+                              <div className="font-semibold text-orange-700">
+                                {new Date(`${deadline.due_date}T00:00:00`).toLocaleDateString()}
+                              </div>
+                              <div className="max-w-40 truncate text-xs text-muted-foreground">
+                                {deadline.label}{pendingCount > 1 ? ` · +${pendingCount - 1} more` : ''}
+                              </div>
+                            </>
+                          ) : (
+                            <span className="inline-flex items-center gap-1.5 text-muted-foreground">
+                              <CalendarDays className="h-4 w-4" />
+                              Add deadlines
+                            </span>
+                          )}
+                        </button>
+                      )
+                    })()}
                   </td>
                   <td className="p-4">
                     <select
@@ -552,6 +647,119 @@ export default function TrackerPage() {
           </form>
         </div>
       )}
+
+      {deadlineAppId && (() => {
+        const application = applications.find(item => item.id === deadlineAppId)
+        if (!application) return null
+        const deadlines = [...(application.deadlines || [])]
+          .sort((a, b) => a.due_date.localeCompare(b.due_date))
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 p-4">
+            <div className="w-full max-w-xl rounded-2xl bg-background p-6 shadow-2xl">
+              <div className="mb-5 flex items-start justify-between gap-4">
+                <div>
+                  <h2 className="text-2xl font-bold">Application deadlines</h2>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    {application.opportunities.company} · {application.opportunities.title}
+                  </p>
+                </div>
+                <button
+                  onClick={() => setDeadlineAppId(null)}
+                  aria-label="Close"
+                  className="rounded-full p-2 hover:bg-muted"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+
+              <div className="max-h-72 space-y-2 overflow-y-auto">
+                {deadlines.length === 0 && application.opportunities.deadline && (
+                  <div className="rounded-xl border border-dashed p-3">
+                    <div className="text-sm font-medium">Original opportunity deadline</div>
+                    <div className="text-sm text-muted-foreground">
+                      {new Date(`${application.opportunities.deadline}T00:00:00`).toLocaleDateString()}
+                    </div>
+                  </div>
+                )}
+                {deadlines.length === 0 && !application.opportunities.deadline && (
+                  <div className="rounded-xl border border-dashed p-6 text-center text-sm text-muted-foreground">
+                    No deadlines yet. Add the first milestone below.
+                  </div>
+                )}
+                {deadlines.map(deadline => (
+                  <div key={deadline.id} className="flex items-center gap-3 rounded-xl border p-3">
+                    <button
+                      onClick={() => void toggleDeadline(application.id, deadline)}
+                      disabled={savingDeadline === deadline.id}
+                      aria-label={deadline.completed ? `Reopen ${deadline.label}` : `Complete ${deadline.label}`}
+                      className="shrink-0 text-muted-foreground hover:text-emerald-600"
+                    >
+                      {savingDeadline === deadline.id
+                        ? <Loader2 className="h-5 w-5 animate-spin" />
+                        : deadline.completed
+                          ? <CheckCircle2 className="h-5 w-5 text-emerald-600" />
+                          : <Circle className="h-5 w-5" />}
+                    </button>
+                    <div className="min-w-0 flex-1">
+                      <div className={`truncate text-sm font-semibold ${deadline.completed ? 'line-through opacity-60' : ''}`}>
+                        {deadline.label}
+                      </div>
+                      <div className="text-xs text-muted-foreground">
+                        {new Date(`${deadline.due_date}T00:00:00`).toLocaleDateString(undefined, {
+                          month: 'long',
+                          day: 'numeric',
+                          year: 'numeric',
+                        })}
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => void removeDeadline(application.id, deadline.id)}
+                      disabled={savingDeadline === deadline.id}
+                      aria-label={`Delete ${deadline.label}`}
+                      className="rounded p-2 text-red-400 hover:bg-red-50 hover:text-red-600"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+
+              <form onSubmit={event => void addDeadline(event)} className="mt-5 border-t pt-5">
+                <div className="grid gap-3 sm:grid-cols-[1fr_160px]">
+                  <label className="text-sm font-medium">
+                    Milestone name
+                    <input
+                      required
+                      value={deadlineForm.label}
+                      onChange={event => setDeadlineForm(current => ({ ...current, label: event.target.value }))}
+                      placeholder="Idea submission"
+                      className="mt-1.5 w-full rounded-lg border bg-background px-3 py-2.5 font-normal"
+                    />
+                  </label>
+                  <label className="text-sm font-medium">
+                    Due date
+                    <input
+                      required
+                      type="date"
+                      value={deadlineForm.due_date}
+                      onChange={event => setDeadlineForm(current => ({ ...current, due_date: event.target.value }))}
+                      className="mt-1.5 w-full rounded-lg border bg-background px-3 py-2.5 font-normal"
+                    />
+                  </label>
+                </div>
+                <button
+                  type="submit"
+                  disabled={savingDeadline === 'new' || !deadlineForm.label.trim() || !deadlineForm.due_date}
+                  className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-lg bg-primary px-4 py-2.5 font-medium text-primary-foreground disabled:opacity-50"
+                >
+                  {savingDeadline === 'new' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+                  Add deadline
+                </button>
+              </form>
+            </div>
+          </div>
+        )
+      })()}
     </div>
   )
 }

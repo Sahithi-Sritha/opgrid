@@ -46,6 +46,43 @@ export type Application = {
   created_at: string;
   opportunity?: Opportunity;
   opportunities?: Opportunity;
+  deadlines?: ApplicationDeadline[];
+};
+
+export type ApplicationDeadline = {
+  id: string;
+  label: string;
+  due_date: string;
+  completed: boolean;
+};
+
+export type DashboardDeadline = ApplicationDeadline & {
+  id: string;
+  deadline_id: string | null;
+  application_id: string | null;
+  opportunity_id: string;
+  title: string;
+  company: string;
+  status: string;
+  deadline: string;
+  days_remaining: number;
+  urgency_level: 'urgent' | 'warning' | 'normal';
+  already_applied: boolean;
+  can_complete: boolean;
+  url: string | null;
+};
+
+export type DashboardData = {
+  stats: {
+    total_opportunities: number;
+    applications_this_week: number;
+    deadlines_next_7_days: number;
+    active_pipeline: number;
+    tracked_applications: number;
+  };
+  deadlines: DashboardDeadline[];
+  activities: Notification[];
+  sparkline: Array<{ date: string; count: number }>;
 };
 
 export type Notification = {
@@ -188,6 +225,30 @@ class ApiClient {
     });
   }
 
+  async addApplicationDeadline(id: string, deadline: { label: string; due_date: string }) {
+    return this.request<Application>(`/api/applications/${id}/deadlines`, {
+      method: 'POST',
+      body: JSON.stringify(deadline),
+    });
+  }
+
+  async updateApplicationDeadline(
+    id: string,
+    deadlineId: string,
+    updates: Partial<Pick<ApplicationDeadline, 'label' | 'due_date' | 'completed'>>,
+  ) {
+    return this.request<Application>(`/api/applications/${id}/deadlines/${deadlineId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(updates),
+    });
+  }
+
+  async deleteApplicationDeadline(id: string, deadlineId: string) {
+    return this.request<Application>(`/api/applications/${id}/deadlines/${deadlineId}`, {
+      method: 'DELETE',
+    });
+  }
+
   async parseTimelines(text: string) {
     return this.request<{
       message: string;
@@ -234,21 +295,8 @@ class ApiClient {
   }
 
   // Dashboard
-  async getDashboardStats() {
-    return this.request<{
-      total_opportunities: number;
-      applications_this_week: number;
-      deadlines_next_7_days: number;
-      active_pipeline: number;
-    }>('/api/dashboard/stats');
-  }
-
-  async getUrgentDeadlines() {
-    return this.request<Opportunity[]>('/api/dashboard/urgent-deadlines');
-  }
-
-  async getActivityFeed() {
-    return this.request<any[]>('/api/dashboard/activity');
+  async getDashboard() {
+    return this.request<DashboardData>('/api/dashboard');
   }
 
   // Saved Opportunities

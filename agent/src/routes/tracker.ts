@@ -1,4 +1,5 @@
 import { Router } from 'express'
+import { randomUUID } from 'crypto'
 import { GoogleGenerativeAI } from '@google/generative-ai'
 import { supabase } from '../config/supabase'
 import { getGeminiKey } from '../utils/gemini-keys'
@@ -9,11 +10,27 @@ import {
   parseTimelinesFallback,
   TRACKER_STATUSES,
   type ParsedTimeline,
+  writeApplicationMetadata,
 } from '../services/timeline-parser'
 
 const router = Router()
 
 async function createTrackedItem(item: ParsedTimeline, appliedDate?: string | null) {
+  const deadlines = (item.deadlines?.length
+    ? item.deadlines
+    : item.deadline
+      ? [{ label: 'Application deadline', due_date: item.deadline }]
+      : []
+  ).map(deadline => ({
+    id: randomUUID(),
+    label: deadline.label,
+    due_date: deadline.due_date,
+    completed: false,
+  }))
+  const encoded = encodeStageForLegacyDatabase(
+    item.status,
+    writeApplicationMetadata(item.notes, null, deadlines),
+  )
   const opportunity = {
     title: item.title || 'Unknown Opportunity',
     company: item.company,
@@ -32,32 +49,16 @@ async function createTrackedItem(item: ParsedTimeline, appliedDate?: string | nu
     throw opportunityError || new Error('Failed to create opportunity')
   }
 
-  let { data: application, error: applicationError } = await supabase
+  const { data: application, error: applicationError } = await supabase
     .from('applications')
     .insert({
       opportunity_id: newOpportunity.id,
-      status: item.status,
-      notes: item.notes || null,
+      status: encoded.status,
+      notes: encoded.notes,
       applied_date: appliedDate || new Date().toISOString().slice(0, 10),
     })
     .select()
     .single()
-
-  if (applicationError?.code === '23514') {
-    const legacy = encodeStageForLegacyDatabase(item.status, item.notes)
-    const retry = await supabase
-      .from('applications')
-      .insert({
-        opportunity_id: newOpportunity.id,
-        status: legacy.status,
-        notes: legacy.notes,
-        applied_date: appliedDate || new Date().toISOString().slice(0, 10),
-      })
-      .select()
-      .single()
-    application = retry.data
-    applicationError = retry.error
-  }
 
   if (applicationError || !application) {
     await supabase.from('opportunities').delete().eq('id', newOpportunity.id)
@@ -80,7 +81,8 @@ async function extractWithGemini(text: string): Promise<ParsedTimeline[]> {
 Return a JSON array. Each object must contain:
 - company: organizer or company
 - title: opportunity name
-- deadline: YYYY-MM-DD or null
+- deadline: the earliest upcoming date as YYYY-MM-DD or null
+- deadlines: every named milestone as [{"label":"Idea submission","due_date":"2026-07-05"}]
 - status: exactly one of ${TRACKER_STATUSES.join(', ')}
 - notes: useful timeline context or null
 - url: full URL or null
@@ -161,6 +163,7 @@ router.post('/manual', async (req, res) => {
       company,
       title,
       deadline: req.body?.deadline || null,
+      deadlines: Array.isArray(req.body?.deadlines) ? req.body.deadlines : undefined,
       status: req.body?.status || 'to_apply',
       notes: req.body?.notes || null,
       url: req.body?.url || null,
