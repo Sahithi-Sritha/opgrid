@@ -191,10 +191,18 @@ router.get('/:id', async (req, res) => {
   }
 })
 
-// PATCH /api/opportunities/:id - Update safe interaction fields.
+// PATCH /api/opportunities/:id - Update fields edited by the frontend.
 router.patch('/:id', async (req, res) => {
   try {
-    const allowedFields = ['seen_at', 'last_notified_at', 'registration_open']
+    const allowedFields = [
+      'company',
+      'title',
+      'deadline',
+      'url',
+      'seen_at',
+      'last_notified_at',
+      'registration_open',
+    ]
     const updates = Object.fromEntries(
       Object.entries(req.body || {}).filter(([key]) => allowedFields.includes(key)),
     )

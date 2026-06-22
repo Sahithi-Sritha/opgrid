@@ -1,8 +1,12 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { supabase, type Application, type Opportunity } from '@/lib/supabase'
-import { apiUrl } from '@/lib/api-client'
+import {
+  apiClient,
+  apiUrl,
+  type Application,
+  type Opportunity,
+} from '@/lib/api-client'
 import { Badge } from '@/components/Badge'
 
 type ApplicationWithOpportunity = Application & {
@@ -37,14 +41,18 @@ export default function TrackerPage() {
   }, [])
 
   const loadApplications = async () => {
-    const { data, error } = await supabase
-      .from('applications')
-      .select('*, opportunities(*)')
+    setLoading(true)
+    const { data, error } = await apiClient.getApplications()
 
     if (error) {
       console.error('Error loading applications:', error)
     } else {
-      setApplications(data as any || [])
+      setApplications(
+        (data || []).filter(
+          (application): application is ApplicationWithOpportunity =>
+            Boolean(application.opportunities),
+        ),
+      )
     }
     setLoading(false)
   }
@@ -77,17 +85,14 @@ export default function TrackerPage() {
   // Update application fields (status, notes)
   const updateApplication = async (appId: string, updates: Record<string, any>) => {
     setSavingId(appId)
-    const { error } = await supabase
-      .from('applications')
-      .update(updates)
-      .eq('id', appId)
+    const { data, error } = await apiClient.updateApplication(appId, updates)
 
     if (error) {
       console.error('Failed to update application:', error)
       alert('Failed to save changes')
     } else {
       setApplications(prev => prev.map(app =>
-        app.id === appId ? { ...app, ...updates } : app
+        app.id === appId ? { ...app, ...(data || updates) } : app
       ))
     }
     setSavingId(null)
@@ -96,10 +101,7 @@ export default function TrackerPage() {
   // Update opportunity fields (company, title, deadline, url)
   const updateOpportunity = async (oppId: string, appId: string, updates: Record<string, any>) => {
     setSavingId(appId)
-    const { error } = await supabase
-      .from('opportunities')
-      .update(updates)
-      .eq('id', oppId)
+    const { data, error } = await apiClient.updateOpportunity(oppId, updates)
 
     if (error) {
       console.error('Failed to update opportunity:', error)
@@ -107,7 +109,7 @@ export default function TrackerPage() {
     } else {
       setApplications(prev => prev.map(app =>
         app.id === appId
-          ? { ...app, opportunities: { ...app.opportunities, ...updates } }
+          ? { ...app, opportunities: { ...app.opportunities, ...(data || updates) } }
           : app
       ))
     }
@@ -204,9 +206,12 @@ export default function TrackerPage() {
 
   const deleteApplication = async (appId: string) => {
     if (!confirm('Delete this tracked item?')) return
-    const { error } = await supabase.from('applications').delete().eq('id', appId)
+    const { error } = await apiClient.deleteApplication(appId)
     if (!error) {
       setApplications(prev => prev.filter(a => a.id !== appId))
+    } else {
+      console.error('Failed to delete application:', error)
+      alert('Failed to delete application')
     }
   }
 

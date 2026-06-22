@@ -60,6 +60,7 @@ router.post('/', async (req, res) => {
 router.patch('/:id', async (req, res) => {
   try {
     const allowedFields = [
+      'applied_date',
       'status',
       'resume_version',
       'referral_name',

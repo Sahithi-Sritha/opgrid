@@ -45,6 +45,7 @@ export type Application = {
   notes: string | null;
   created_at: string;
   opportunity?: Opportunity;
+  opportunities?: Opportunity;
 };
 
 export type Notification = {
