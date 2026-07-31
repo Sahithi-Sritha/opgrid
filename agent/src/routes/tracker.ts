@@ -36,7 +36,14 @@ async function createTrackedItem(item: ParsedTimeline, appliedDate?: string | nu
     company: item.company,
     deadline: item.deadline || null,
     url: item.url || `pasted-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`,
-    source: 'career_page',
+    source: item.category === 'hackathon'
+      ? 'hackathon'
+      : item.category === 'fellowship'
+        ? 'fellowship'
+        : item.category === 'competition'
+          ? 'competition'
+          : 'career_page',
+    category: item.category || null,
   }
 
   const { data: newOpportunity, error: opportunityError } = await supabase
@@ -81,6 +88,7 @@ async function extractWithGemini(text: string): Promise<ParsedTimeline[]> {
 Return a JSON array. Each object must contain:
 - company: organizer or company
 - title: opportunity name
+- category: one of internship, hackathon, fellowship, competition, research, or null
 - deadline: the earliest upcoming date as YYYY-MM-DD or null
 - deadlines: every named milestone as [{"label":"Idea submission","due_date":"2026-07-05"}]
 - status: exactly one of ${TRACKER_STATUSES.join(', ')}
@@ -162,6 +170,7 @@ router.post('/manual', async (req, res) => {
     const item = normalizeParsedTimeline({
       company,
       title,
+      category: req.body?.category || null,
       deadline: req.body?.deadline || null,
       deadlines: Array.isArray(req.body?.deadlines) ? req.body.deadlines : undefined,
       status: req.body?.status || 'to_apply',

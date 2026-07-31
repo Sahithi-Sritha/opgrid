@@ -21,6 +21,7 @@ export const TRACKER_STATUSES = [
 ] as const
 
 export type TrackerStatus = typeof TRACKER_STATUSES[number]
+export type OpportunityCategory = 'internship' | 'hackathon' | 'fellowship' | 'competition' | 'research'
 
 export type ApplicationDeadline = {
   id: string
@@ -32,11 +33,30 @@ export type ApplicationDeadline = {
 export type ParsedTimeline = {
   company: string
   title: string
+  category?: OpportunityCategory | null
   deadline: string | null
   deadlines?: Array<Pick<ApplicationDeadline, 'label' | 'due_date'>>
   status: TrackerStatus
   notes: string | null
   url: string | null
+}
+
+const OPPORTUNITY_CATEGORIES: OpportunityCategory[] = [
+  'internship',
+  'hackathon',
+  'fellowship',
+  'competition',
+  'research',
+]
+
+export function inferOpportunityCategory(text: string): OpportunityCategory | null {
+  const value = text.toLowerCase()
+  if (/\b(fellowship|scholar|cohort)\b/.test(value)) return 'fellowship'
+  if (/\b(hackathon|hack\b|prototype|buildathon)\b/.test(value)) return 'hackathon'
+  if (/\b(competition|challenge|contest)\b/.test(value)) return 'competition'
+  if (/\b(research|lab|thesis)\b/.test(value)) return 'research'
+  if (/\b(intern|internship|trainee)\b/.test(value)) return 'internship'
+  return null
 }
 
 const LEGACY_STATUSES = new Set([
@@ -315,6 +335,7 @@ export function parseTimelinesFallback(text: string, now = new Date()): ParsedTi
       return {
         company,
         title: title || 'Unknown Opportunity',
+        category: inferOpportunityCategory(line),
         deadline: deadlines[0]?.due_date || extractDate(line, now),
         deadlines,
         status: inferStatus(line),
@@ -353,6 +374,9 @@ export function normalizeParsedTimeline(value: any): ParsedTimeline | null {
   return {
     company: String(value.company).trim(),
     title: String(value.title || 'Unknown Opportunity').trim(),
+    category: OPPORTUNITY_CATEGORIES.includes(value.category)
+      ? value.category
+      : inferOpportunityCategory(`${value.title || ''} ${value.notes || ''}`),
     deadline: primaryDeadline,
     deadlines: deadlines.length > 0
       ? deadlines

@@ -33,15 +33,15 @@ function isExternalUrl(url: string) {
 export default function FeedPage() {
   const [opportunities, setOpportunities] = useState<Opportunity[]>([])
   const [loading, setLoading] = useState(true)
-  const [refreshing, setRefreshing] = useState(false)
+  const [scraping, setScraping] = useState(false)
+  const [scrapeStatus, setScrapeStatus] = useState<string | null>(null)
   const [filter, setFilter] = useState('all')
   const [search, setSearch] = useState('')
   const [sort, setSort] = useState<'newest' | 'deadline'>('newest')
   const [error, setError] = useState<string | null>(null)
 
   const loadOpportunities = useCallback(async (isRefresh = false) => {
-    if (isRefresh) setRefreshing(true)
-    else setLoading(true)
+    if (!isRefresh) setLoading(true)
     setError(null)
 
     const { data, error: requestError } = await apiClient.getOpportunities({
@@ -56,8 +56,24 @@ export default function FeedPage() {
     }
 
     setLoading(false)
-    setRefreshing(false)
   }, [filter])
+
+  const handleRefresh = useCallback(async () => {
+    setScraping(true)
+    setScrapeStatus('Agent is searching for new opportunities…')
+    setError(null)
+
+    const { error: scrapeError } = await apiClient.triggerScrape()
+    if (scrapeError) {
+      setScrapeStatus('Scrape had issues, loading cached results…')
+    } else {
+      setScrapeStatus('Found new opportunities! Loading…')
+    }
+
+    await loadOpportunities(true)
+    setScraping(false)
+    setScrapeStatus(null)
+  }, [loadOpportunities])
 
   useEffect(() => {
     loadOpportunities()
@@ -115,15 +131,23 @@ export default function FeedPage() {
             </p>
           </div>
 
-          <button
-            type="button"
-            onClick={() => loadOpportunities(true)}
-            disabled={refreshing}
-            className="inline-flex h-11 items-center justify-center gap-2 rounded-xl border bg-white px-4 text-sm font-semibold shadow-sm transition hover:border-primary/30 hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            <RefreshCw className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
-            Refresh
-          </button>
+          <div className="flex flex-col items-end gap-1.5">
+            <button
+              type="button"
+              id="feed-refresh-btn"
+              onClick={handleRefresh}
+              disabled={scraping}
+              className="inline-flex h-11 items-center justify-center gap-2 rounded-xl border bg-white px-4 text-sm font-semibold shadow-sm transition hover:border-primary/30 hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              <RefreshCw className={`h-4 w-4 ${scraping ? 'animate-spin' : ''}`} />
+              {scraping ? 'Scraping…' : 'Refresh'}
+            </button>
+            {scrapeStatus && (
+              <span className="text-xs font-medium text-blue-600 animate-pulse">
+                {scrapeStatus}
+              </span>
+            )}
+          </div>
         </div>
 
         <div className="mt-7 grid gap-3 md:grid-cols-[minmax(0,1fr)_180px]">

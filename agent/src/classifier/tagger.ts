@@ -1,12 +1,16 @@
 import { GoogleGenerativeAI } from '@google/generative-ai'
+import { BedrockRuntimeClient, InvokeModelCommand } from '@aws-sdk/client-bedrock-runtime'
 import { Opportunity } from '../config/supabase'
 import { getGeminiKey } from '../utils/gemini-keys'
 
+// ponytail: Use Bedrock if AWS_REGION is set, otherwise fallback to Gemini
+const useBedrock = !!process.env.AWS_REGION
+const bedrock = useBedrock ? new BedrockRuntimeClient({ region: process.env.AWS_REGION || 'us-east-1' }) : null
+
 export async function classifyOpportunity(opp: Opportunity): Promise<Opportunity | null> {
   try {
-    const genAI = new GoogleGenerativeAI(getGeminiKey())
-    const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' })
-
+    let text: string
+    
     const prompt = `Analyze this opportunity and extract structured information.
 CRITICAL: Evaluate if this specific opportunity is relevant and eligible for a 3rd-year Computer Science Engineering (CSE) student based in India. 
 Reject general career portals, index pages, season schedules (e.g. MLH Seasons), past events, or non-actionable links.
@@ -36,9 +40,29 @@ Respond ONLY in valid JSON format:
   "ppo_possible": true/false
 }`
 
-    const result = await model.generateContent(prompt)
-    const response = result.response
-    const text = response.text()
+    // Use Bedrock if available, otherwise Gemini
+    if (useBedrock && bedrock) {
+      const command = new InvokeModelCommand({
+        modelId: 'anthropic.claude-3-haiku-20240307-v1:0', // Haiku is cheapest
+        contentType: 'application/json',
+        accept: 'application/json',
+        body: JSON.stringify({
+          anthropic_version: 'bedrock-2023-05-31',
+          max_tokens: 500,
+          messages: [{ role: 'user', content: prompt }]
+        })
+      })
+      
+      const response = await bedrock.send(command)
+      const responseBody = JSON.parse(new TextDecoder().decode(response.body))
+      text = responseBody.content[0].text
+    } else {
+      // Fallback to Gemini
+      const genAI = new GoogleGenerativeAI(getGeminiKey())
+      const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' })
+      const result = await model.generateContent(prompt)
+      text = result.response.text()
+    }
     
     const cleanedText = text.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim()
     const parsed = JSON.parse(cleanedText)

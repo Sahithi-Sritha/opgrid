@@ -17,7 +17,7 @@ Automatically monitors:
 - Company career pages (Stripe, Airbnb, Figma, etc.)
 
 ### 🏷️ **AI-Powered Auto-Tagging**
-Claude AI automatically detects:
+Amazon Bedrock (Claude 3 Haiku) automatically detects:
 - `internship` - Is this an internship position?
 - `remote` - Remote work available?
 - `stipend` - Compensation mentioned?
@@ -87,8 +87,8 @@ cd agent && npm run dev     # Terminal 2 - Agent on :3001
 ┌─────────────────────────────────────┐
 │         Agent (Railway/Render)       │
 │  ┌──────────┐  ┌──────────────┐    │
-│  │ Scrapers │→ │  Classifier  │    │
-│  └──────────┘  │ (Claude AI)  │    │
+│  │ Scrapers │→ │  Classifier  │────┼──→ Amazon Bedrock
+│  └──────────┘  │  (AI-powered)│    │    (Claude 3 Haiku)
 │                 └──────┬───────┘    │
 │  ┌──────────┐         │             │
 │  │Scheduler │  ┌──────▼───────┐    │
@@ -100,7 +100,7 @@ cd agent && npm run dev     # Terminal 2 - Agent on :3001
 
 **Data Flow**:
 1. Cron triggers scrapers every 6 hours
-2. Claude AI tags and extracts metadata
+2. **Amazon Bedrock (Claude AI)** tags and extracts metadata
 3. New opportunities saved to Supabase
 4. Notifications sent via email/Telegram
 5. Users browse feed and track applications
@@ -116,7 +116,7 @@ cd agent && npm run dev     # Terminal 2 - Agent on :3001
 | **Frontend** | Next.js 14 + TypeScript + Tailwind | Server components, great DX |
 | **Backend** | Express + node-cron | Lightweight, reliable scheduling |
 | **Database** | Supabase (PostgreSQL) | Managed, real-time, built-in auth |
-| **AI** | Anthropic Claude | Best text understanding |
+| **AI** | Amazon Bedrock (Claude 3 Haiku) | AWS Free Tier, best text understanding |
 | **Email** | Resend | Developer-friendly API |
 | **Notifications** | Telegram Bot | Instant push, no app needed |
 | **Scraping** | Axios + Cheerio + Puppeteer | HTML parsing + JS rendering |
@@ -228,7 +228,7 @@ Already hosted! Just run `schema.sql` in SQL Editor.
 | Railway | $5 credit | Pro | $5-10 |
 | Supabase | ✅ Yes | Pro | $0-25 |
 | Resend | 100 emails/day | Pro | $0-10 |
-| Anthropic | Pay-as-go | - | ~$10 |
+| Amazon Bedrock | $200 credits (2mo) | Pay-per-use | $0-10 |
 | **Total** | **~$10/mo** | **Full** | **$50-60/mo** |
 
 Most students can run this **under $15/month** on free/starter tiers.
@@ -298,7 +298,7 @@ See [LICENSE](LICENSE) for details.
 Built with:
 - [Next.js](https://nextjs.org/) - React framework
 - [Supabase](https://supabase.com/) - Database & auth
-- [Anthropic](https://www.anthropic.com/) - Claude AI
+- [Amazon Bedrock](https://aws.amazon.com/bedrock/) - AI classification (Claude 3 Haiku)
 - [Resend](https://resend.com/) - Email API
 - [Cheerio](https://cheerio.js.org/) - HTML parsing
 

@@ -264,6 +264,7 @@ class ApiClient {
   async addTrackedItem(application: {
     company: string;
     title: string;
+    category?: 'internship' | 'hackathon' | 'fellowship' | 'competition' | 'research' | null;
     status: string;
     applied_date?: string | null;
     deadline?: string | null;
@@ -320,6 +321,48 @@ class ApiClient {
     return this.request<void>(`/api/opportunities/${opportunityId}/save`, {
       method: 'DELETE',
     });
+  }
+
+  async triggerScrape() {
+    const [internships, hackathons, workflow] = await Promise.allSettled([
+      this.request<{ message: string }>('/trigger-scrape', { method: 'POST' }),
+      this.request<{ message: string }>('/trigger-hackathons', { method: 'POST' }),
+      this.request<{ dispatched: boolean; message: string }>('/api/workflow/dispatch', {
+        method: 'POST',
+        body: JSON.stringify({ task: 'scrape' }),
+      }),
+    ]);
+
+    const internshipResult =
+      internships.status === 'fulfilled' ? internships.value : { data: null, error: new Error('Internship scrape failed') };
+    const hackathonResult =
+      hackathons.status === 'fulfilled' ? hackathons.value : { data: null, error: new Error('Hackathon scrape failed') };
+    const workflowResult =
+      workflow.status === 'fulfilled' ? workflow.value : { data: null, error: new Error('Workflow dispatch failed') };
+
+    // Direct scrape errors are critical; workflow dispatch failure is non-blocking
+    const directError = internshipResult.error || hackathonResult.error;
+
+    const parts: string[] = [];
+    if (internshipResult.data?.message) parts.push(internshipResult.data.message);
+    if (hackathonResult.data?.message) parts.push(hackathonResult.data.message);
+    if (workflowResult.data?.message) parts.push(workflowResult.data.message);
+    if (workflowResult.error) parts.push('GitHub workflow not configured (optional)');
+
+    return {
+      data: directError ? null : { message: parts.join('. ') },
+      error: directError,
+    };
+  }
+
+  async dispatchWorkflow(task: 'scrape' | 'deadlines' | 'digest' | 'follow-ups' | 'all' = 'scrape') {
+    return this.request<{ dispatched: boolean; task: string; message: string }>(
+      '/api/workflow/dispatch',
+      {
+        method: 'POST',
+        body: JSON.stringify({ task }),
+      },
+    );
   }
 
   async getHealth() {
