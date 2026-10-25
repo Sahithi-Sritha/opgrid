@@ -5,6 +5,10 @@ import { compileLatexToPDF, uploadPDFToStorage } from '../services/latex-compile
 
 const router = Router()
 
+router.use((_req, res) => {
+  res.status(501).json({ error: 'PDF compilation is disabled until a sandboxed LaTeX compiler is configured. Saving and versioning LaTeX remains available.' })
+})
+
 // POST /api/resume/apply-edits
 // Apply selected edits and regenerate PDF
 router.post('/apply-edits', async (req, res) => {

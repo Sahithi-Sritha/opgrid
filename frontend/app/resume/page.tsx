@@ -7,6 +7,8 @@ import { ResumeVersion, JdAnalysis } from './types';
 import ResumeSidebar from './components/ResumeSidebar';
 import JdAnalyzer from './components/JdAnalyzer';
 import LatexEditor from './components/LatexEditor';
+import ResumeFeedback from './components/ResumeFeedback';
+import { apiClient } from '@/lib/api-client';
 
 export default function ResumePage() {
   const [versions, setVersions] = useState<ResumeVersion[]>([]);
@@ -20,31 +22,30 @@ export default function ResumePage() {
 
   const activeVersion = versions.find(v => v.id === activeVersionId);
 
-  // Mock initial data load
   useEffect(() => {
-    const mockVersions: ResumeVersion[] = [
-      {
-        id: '1',
-        label: 'Software Engineer - Base',
-        filename: 'resume_base.tex',
-        latex_source: '\\documentclass{article}\\begin{document}Base Resume\\end{document}',
-        pdf_url: null,
-        base_version_id: null,
-        created_at: new Date(Date.now() - 86400000 * 2).toISOString(),
-      },
-      {
-        id: '2',
-        label: 'Frontend Developer (Stripe)',
-        filename: 'resume_frontend.tex',
-        latex_source: '\\documentclass{article}\\begin{document}Frontend Resume\\end{document}',
-        pdf_url: null,
-        base_version_id: '1',
-        created_at: new Date(Date.now() - 86400000).toISOString(),
-      }
-    ];
-    setVersions(mockVersions);
-    setActiveVersionId('2');
+    void apiClient.getResumeVersions().then(({ data }) => {
+      const resumes = (data?.resumes || []) as ResumeVersion[]
+      setVersions(resumes)
+      setActiveVersionId(resumes[0]?.id || null)
+    })
   }, []);
+
+  const createResume = async () => {
+    const label = window.prompt('Resume name')?.trim()
+    if (!label) return
+    const latex = '\\documentclass{article}\n\\begin{document}\nYour resume content\n\\end{document}'
+    const { data, error } = await apiClient.createResume(label, latex)
+    if (error || !data) return alert(error?.message || 'Could not create resume')
+    const resume = data.resume as ResumeVersion
+    setVersions(current => [resume, ...current]); setActiveVersionId(resume.id)
+  }
+
+  const saveActiveResume = async () => {
+    if (!activeVersion) return
+    const { data, error } = await apiClient.updateResume(activeVersion.id, { latex_source: activeVersion.latex_source })
+    if (error || !data) return alert(error?.message || 'Could not save resume')
+    setVersions(current => current.map(item => item.id === activeVersion.id ? data.resume : item))
+  }
 
   const handleAnalyze = async () => {
     setIsAnalyzing(true);
@@ -161,7 +162,7 @@ export default function ResumePage() {
             versions={versions}
             activeVersionId={activeVersionId}
             onSelectVersion={setActiveVersionId}
-            onUpload={(file) => console.log('Uploading', file)}
+            onUpload={() => void createResume()}
           />
         </div>
 
@@ -178,6 +179,7 @@ export default function ResumePage() {
             analysis={analysis}
             onApplyEdits={handleApplyEdits}
           />
+          <ResumeFeedback />
           
           {/* Quick trigger for demonstration */}
           <div className="absolute bottom-4 left-1/2 -translate-x-1/2 md:hidden">
@@ -201,6 +203,7 @@ export default function ResumePage() {
               }
             }}
           />
+          {activeVersion && <button onClick={() => void saveActiveResume()} className="absolute right-6 top-20 rounded-lg bg-indigo-600 px-3 py-2 text-xs font-medium text-white">Save LaTex</button>}
         </div>
       </div>
 

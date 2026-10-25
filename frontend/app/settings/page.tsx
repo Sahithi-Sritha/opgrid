@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react'
 import { AlertCircle, CheckCircle, Clock, Play } from 'lucide-react'
 import { formatDistanceToNow } from 'date-fns'
-import { apiUrl } from '@/lib/api-client'
+import { apiClient, apiUrl } from '@/lib/api-client'
 
 type ScraperStatus = {
   name: string
@@ -35,7 +35,7 @@ export default function SettingsPage() {
 
   const loadCustomSources = async () => {
     try {
-      const response = await fetch(apiUrl('/api/sources'))
+      const response = await fetch(apiUrl('/api/sources'), { headers: apiClient.authHeaders() })
       const data = await response.json()
       setCustomSources(data.sources || [])
     } catch (error) {
@@ -50,7 +50,7 @@ export default function SettingsPage() {
     try {
       const response = await fetch(apiUrl('/api/sources'), {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...apiClient.authHeaders() },
         body: JSON.stringify({ url: newSource.trim() })
       })
       const data = await response.json()
@@ -69,7 +69,7 @@ export default function SettingsPage() {
     try {
       const response = await fetch(apiUrl('/api/sources'), {
         method: 'DELETE',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...apiClient.authHeaders() },
         body: JSON.stringify({ url })
       })
       const data = await response.json()
@@ -84,7 +84,7 @@ export default function SettingsPage() {
   const loadScraperHealth = async () => {
     setLoading(true)
     try {
-      const response = await fetch(apiUrl('/api/scrapers/health'))
+      const response = await fetch(apiUrl('/api/scrapers/health'), { headers: apiClient.authHeaders() })
       const data = await response.json()
       setScrapers(data.scrapers || [])
     } catch (error) {
@@ -96,7 +96,8 @@ export default function SettingsPage() {
   const runScraper = async (scraperName: string) => {
     try {
       await fetch(apiUrl(`/api/scrapers/run?scraper=${scraperName}`), {
-        method: 'POST'
+        method: 'POST',
+        headers: apiClient.authHeaders(),
       })
       // Reload health after 2 seconds
       setTimeout(loadScraperHealth, 2000)

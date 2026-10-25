@@ -8,6 +8,10 @@ const router = Router()
 // Handle incoming Telegram messages for follow-up tracking
 router.post('/webhook', async (req, res) => {
   try {
+    const secret = process.env.TELEGRAM_WEBHOOK_SECRET
+    if (!secret || req.header('x-telegram-bot-api-secret-token') !== secret) {
+      return res.status(401).json({ error: 'Invalid webhook secret' })
+    }
     const { message } = req.body
 
     if (!message || !message.text) {
@@ -25,10 +29,18 @@ router.post('/webhook', async (req, res) => {
       return res.json({ ok: true })
     }
 
-    // Get pending follow-ups
+    const { data: link, error: linkError } = await supabase
+      .from('telegram_links')
+      .select('user_id')
+      .eq('chat_id', String(chatId))
+      .maybeSingle()
+    if (linkError || !link) return res.json({ ok: true })
+
+    // Get only this Telegram user's pending follow-ups.
     const { data: pendingApps } = await supabase
       .from('applications')
       .select('*, opportunities(*)')
+      .eq('user_id', link.user_id)
       .eq('follow_up_sent', false)
       .eq('status', 'applied')
 

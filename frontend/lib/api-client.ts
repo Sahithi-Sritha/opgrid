@@ -114,8 +114,12 @@ class ApiClient {
     this.baseUrl = baseUrl;
   }
 
-  setAuthToken(token: string) {
+  setAuthToken(token: string | null) {
     this.authToken = token;
+  }
+
+  authHeaders(): Record<string, string> {
+    return this.authToken ? { Authorization: `Bearer ${this.authToken}` } : {};
   }
 
   private async request<T>(
@@ -149,8 +153,10 @@ class ApiClient {
       const data = await response.json();
       return { data, error: null };
     } catch (error) {
-      console.error('API request error:', error);
-      return { data: null, error: error as Error };
+      const message = error instanceof TypeError && error.message === 'Failed to fetch'
+        ? 'Cannot reach the OpGrid agent. Start it with `cd agent && npm run dev`, then confirm NEXT_PUBLIC_API_URL points to it.'
+        : error instanceof Error ? error.message : 'Request failed';
+      return { data: null, error: new Error(message) };
     }
   }
 
@@ -378,6 +384,38 @@ class ApiClient {
         created_at: string;
       }>;
     }>('/api/resume/list');
+  }
+
+  async createResume(label: string, latex_source: string) {
+    return this.request<{ resume: any }>('/api/resume/create', { method: 'POST', body: JSON.stringify({ label, latex_source }) })
+  }
+
+  async updateResume(id: string, updates: { label?: string; latex_source?: string }) {
+    return this.request<{ resume: any }>(`/api/resume/${id}`, { method: 'PATCH', body: JSON.stringify(updates) })
+  }
+
+  async duplicateResume(id: string, label?: string) {
+    return this.request<{ resume: any }>(`/api/resume/${id}/duplicate`, { method: 'POST', body: JSON.stringify({ label }) })
+  }
+
+  async deleteResume(id: string) {
+    return this.request<void>(`/api/resume/${id}`, { method: 'DELETE' })
+  }
+
+  async evaluateResume(file: File, role: string = 'software_engineering_intern') {
+    try {
+      const form = new FormData()
+      form.append('file', file)
+      form.append('role', role)
+      const response = await fetch(`${this.baseUrl}/api/resume/evaluate`, {
+        method: 'POST', headers: this.authHeaders(), body: form,
+      })
+      const body = await response.json().catch(() => null)
+      if (!response.ok) throw new Error(body?.error || 'Resume feedback failed')
+      return { data: body, error: null as Error | null }
+    } catch (error) {
+      return { data: null, error: error as Error }
+    }
   }
 }
 

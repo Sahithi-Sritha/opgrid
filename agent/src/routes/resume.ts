@@ -8,6 +8,90 @@ import path from 'path'
 
 const router = Router()
 const upload = multer({ dest: '/tmp/uploads/' })
+const evaluationUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 8 * 1024 * 1024, files: 1 },
+})
+
+// POST /api/resume/evaluate
+// Forwards a PDF only to a separately deployed, private HackerAgentRank service.
+// The file is held in memory for this request and is never written by OpGrid.
+router.post('/evaluate', evaluationUpload.single('file'), async (req, res) => {
+  const endpoint = process.env.HACKER_AGENT_RANK_URL
+  const file = req.file
+  if (!endpoint) return res.status(503).json({ error: 'Resume feedback is not configured' })
+  if (!file || file.mimetype !== 'application/pdf' || file.buffer.subarray(0, 5).toString() !== '%PDF-') {
+    return res.status(400).json({ error: 'Upload a valid PDF under 8 MB' })
+  }
+
+  try {
+    const form = new FormData()
+    form.set('file', new Blob([file.buffer], { type: 'application/pdf' }), file.originalname || 'resume.pdf')
+    form.set('roles', String(req.body?.role || 'software_engineering_intern'))
+    form.set('enrich', 'false')
+    const headers: Record<string, string> = {}
+    if (process.env.HACKER_AGENT_RANK_API_KEY) headers.Authorization = `Bearer ${process.env.HACKER_AGENT_RANK_API_KEY}`
+    const response = await fetch(`${endpoint.replace(/\/$/, '')}/evaluate`, {
+      method: 'POST', headers, body: form, signal: AbortSignal.timeout(90_000),
+    })
+    if (!response.ok) return res.status(502).json({ error: 'Resume feedback service could not complete the evaluation' })
+    res.json(await response.json())
+  } catch {
+    res.status(502).json({ error: 'Resume feedback service is unavailable. Please try again later.' })
+  }
+})
+
+const MAX_LATEX_LENGTH = 100_000
+const baseSelect = 'id, filename, label, latex_source, pdf_url, base_version_id, created_at, updated_at'
+
+// Create and edit source-only resume versions. Compilation is deliberately externalized.
+router.post('/create', async (req, res) => {
+  const label = String(req.body?.label || '').trim().slice(0, 120)
+  const latexSource = String(req.body?.latex_source || '')
+  if (!label || !latexSource || latexSource.length > MAX_LATEX_LENGTH) return res.status(400).json({ error: 'A name and LaTeX source under 100 KB are required' })
+  const { data, error } = await supabase.from('resume_versions').insert({ filename: `${label}.tex`, label, latex_source: latexSource }).select(baseSelect).single()
+  if (error) return res.status(500).json({ error: 'Failed to create resume' })
+  res.status(201).json({ resume: data })
+})
+
+router.patch('/:id', async (req, res) => {
+  const updates: Record<string, string> = {}
+  if (typeof req.body?.label === 'string' && req.body.label.trim()) updates.label = req.body.label.trim().slice(0, 120)
+  if (typeof req.body?.latex_source === 'string') {
+    if (!req.body.latex_source || req.body.latex_source.length > MAX_LATEX_LENGTH) return res.status(400).json({ error: 'LaTeX source must be under 100 KB' })
+    updates.latex_source = req.body.latex_source
+  }
+  if (!Object.keys(updates).length) return res.status(400).json({ error: 'No valid updates supplied' })
+  const { data, error } = await supabase.from('resume_versions').update({ ...updates, updated_at: new Date().toISOString() }).eq('id', req.params.id).select(baseSelect).maybeSingle()
+  if (error) return res.status(500).json({ error: 'Failed to update resume' })
+  if (!data) return res.status(404).json({ error: 'Resume not found' })
+  res.json({ resume: data })
+})
+
+router.post('/:id/duplicate', async (req, res) => {
+  const { data: original } = await supabase.from('resume_versions').select('filename, label, latex_source').eq('id', req.params.id).maybeSingle()
+  if (!original) return res.status(404).json({ error: 'Resume not found' })
+  const label = String(req.body?.label || `${original.label} copy`).trim().slice(0, 120)
+  const { data, error } = await supabase.from('resume_versions').insert({ filename: `${label}.tex`, label, latex_source: original.latex_source, base_version_id: req.params.id }).select(baseSelect).single()
+  if (error) return res.status(500).json({ error: 'Failed to duplicate resume' })
+  res.status(201).json({ resume: data })
+})
+
+router.delete('/:id', async (req, res) => {
+  const { error } = await supabase.from('resume_versions').delete().eq('id', req.params.id)
+  if (error) return res.status(500).json({ error: 'Failed to delete resume' })
+  res.status(204).send()
+})
+
+router.get('/:id/download', async (req, res) => {
+  const { data: resume } = await supabase.from('resume_versions').select('pdf_url').eq('id', req.params.id).maybeSingle()
+  if (!resume?.pdf_url) return res.status(404).json({ error: 'No compiled PDF is available' })
+  // Legacy rows may contain URLs; new private PDFs must use an object path.
+  if (/^https?:\/\//.test(resume.pdf_url)) return res.status(409).json({ error: 'Recompile this legacy resume with the secure compiler before downloading' })
+  const { data, error } = await supabase.storage.from('resumes').createSignedUrl(resume.pdf_url, 60)
+  if (error || !data) return res.status(500).json({ error: 'Failed to prepare secure download' })
+  res.json({ url: data.signedUrl })
+})
 
 // POST /api/resume/upload
 // Accept .tex or .pdf file
@@ -93,7 +177,7 @@ router.get('/list', async (req, res) => {
   try {
     const { data: resumes, error } = await supabase
       .from('resume_versions')
-      .select('id, filename, label, pdf_url, base_version_id, created_at')
+      .select(baseSelect)
       .order('created_at', { ascending: false })
 
     if (error) {
@@ -118,7 +202,7 @@ router.get('/:id', async (req, res) => {
 
     const { data: resume, error } = await supabase
       .from('resume_versions')
-      .select('*')
+      .select(baseSelect)
       .eq('id', id)
       .single()
 

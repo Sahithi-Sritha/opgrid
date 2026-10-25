@@ -8,6 +8,7 @@
     "build": "tsc",
     "start": "node dist/index.js",
     "task": "ts-node src/run-task.ts",
+    "test:identity": "npm run build && node scripts/opportunity-identity-test.js",
     "postinstall": "npx playwright install chromium || true"
   },
   "keywords": [

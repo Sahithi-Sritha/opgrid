@@ -22,13 +22,23 @@ services:
         sync: false
       - key: SUPABASE_SERVICE_KEY
         sync: false
+      - key: SUPABASE_ANON_KEY
+        sync: false
+      - key: INTERNAL_JOB_SECRET
+        sync: false
+      - key: TELEGRAM_WEBHOOK_SECRET
+        sync: false
+      - key: HACKER_AGENT_RANK_URL
+        sync: false
+      - key: HACKER_AGENT_RANK_API_KEY
+        sync: false
       - key: NEXT_PUBLIC_SUPABASE_URL
         sync: false
       - key: NEXT_PUBLIC_SUPABASE_ANON_KEY
         sync: false
       - key: GEMINI_API_KEY
         sync: false
-      - key: APIFY_API_TOKEN
+      - key: FIRECRAWL_API_KEY
         sync: false
       - key: RESEND_API_KEY
         sync: false

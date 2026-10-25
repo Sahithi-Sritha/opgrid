@@ -4,13 +4,15 @@ import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { apiClient } from '@/lib/api-client'
-import { FileText, LayoutDashboard, ListChecks, Newspaper, Settings } from 'lucide-react'
+import { FileText, LayoutDashboard, ListChecks, LogOut, Newspaper, Settings } from 'lucide-react'
+import { useAuth } from '@/components/AuthProvider'
 
 type AgentState = 'checking' | 'online' | 'offline'
 
 export function Sidebar() {
   const pathname = usePathname()
   const [agentState, setAgentState] = useState<AgentState>('checking')
+  const { signOut } = useAuth()
 
   const navItems = [
     { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
@@ -95,6 +97,7 @@ export function Sidebar() {
           />
           <span className="hidden font-medium lg:inline">{statusLabel}</span>
         </div>
+        <button onClick={() => void signOut()} className="mt-2 flex w-full items-center justify-center gap-2 rounded-xl px-3 py-2 text-xs font-medium text-muted-foreground hover:bg-secondary hover:text-foreground lg:justify-start" title="Sign out"><LogOut className="h-4 w-4" /><span className="hidden lg:inline">Sign out</span></button>
       </div>
     </aside>
   )

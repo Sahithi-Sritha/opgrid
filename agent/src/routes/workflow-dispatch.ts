@@ -1,4 +1,5 @@
 import { Router } from 'express'
+import { requireAdmin } from '../middleware/auth'
 
 const router = Router()
 
@@ -12,7 +13,7 @@ const router = Router()
  * Body (optional):
  *   { "task": "scrape" | "deadlines" | "digest" | "follow-ups" | "all" }
  */
-router.post('/dispatch', async (req, res) => {
+router.post('/dispatch', requireAdmin, async (req, res) => {
   const pat = process.env.GITHUB_PAT
   const owner = process.env.GITHUB_OWNER
   const repo = process.env.GITHUB_REPO

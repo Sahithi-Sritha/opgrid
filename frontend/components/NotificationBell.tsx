@@ -11,9 +11,8 @@ export function NotificationBell() {
   const [notifications, setNotifications] = useState<any[]>([])
 
   useEffect(() => {
-    loadNotifications()
-    subscribeToNotifications()
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    void loadNotifications()
+    return subscribeToNotifications()
   }, [])
 
   const loadNotifications = async () => {
@@ -32,7 +31,7 @@ export function NotificationBell() {
 
   const subscribeToNotifications = () => {
     const channel = supabase
-      .channel('notifications')
+      .channel(`notifications:${crypto.randomUUID()}`)
       .on('postgres_changes', {
         event: 'INSERT',
         schema: 'public',
@@ -47,7 +46,7 @@ export function NotificationBell() {
       .subscribe()
 
     return () => {
-      channel.unsubscribe()
+      void supabase.removeChannel(channel)
     }
   }
 

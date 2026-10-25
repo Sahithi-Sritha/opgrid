@@ -116,7 +116,7 @@ router.post('/:id/save', async (req, res) => {
   try {
     const { error } = await supabase
       .from('saved_opportunities')
-      .upsert({ opportunity_id: req.params.id }, { onConflict: 'opportunity_id' })
+      .upsert({ opportunity_id: req.params.id }, { onConflict: 'user_id,opportunity_id' })
 
     if (error) throw error
     res.json({ saved: true })
@@ -163,7 +163,7 @@ router.post('/:id/reminder', async (req, res) => {
       .from('saved_opportunities')
       .upsert(
         { opportunity_id: req.params.id, reminder_date: reminderDate },
-        { onConflict: 'opportunity_id' },
+        { onConflict: 'user_id,opportunity_id' },
       )
 
     if (error) throw error
@@ -194,15 +194,7 @@ router.get('/:id', async (req, res) => {
 // PATCH /api/opportunities/:id - Update fields edited by the frontend.
 router.patch('/:id', async (req, res) => {
   try {
-    const allowedFields = [
-      'company',
-      'title',
-      'deadline',
-      'url',
-      'seen_at',
-      'last_notified_at',
-      'registration_open',
-    ]
+    const allowedFields = ['seen_at']
     const updates = Object.fromEntries(
       Object.entries(req.body || {}).filter(([key]) => allowedFields.includes(key)),
     )
@@ -211,10 +203,11 @@ router.patch('/:id', async (req, res) => {
       return res.status(400).json({ error: 'No valid fields to update' })
     }
 
+    if (!updates.seen_at) return res.status(400).json({ error: 'Only seen_at may be updated' })
+
     const { data, error } = await supabase
-      .from('opportunities')
-      .update(updates)
-      .eq('id', req.params.id)
+      .from('opportunity_user_state')
+      .upsert({ opportunity_id: req.params.id, seen_at: updates.seen_at }, { onConflict: 'user_id,opportunity_id' })
       .select()
       .single()
 

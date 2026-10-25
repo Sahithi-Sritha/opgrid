@@ -21,12 +21,14 @@ import opportunityRoutes from './routes/opportunities'
 import applicationRoutes from './routes/applications'
 import dashboardRoutes from './routes/dashboard'
 import workflowDispatchRoutes from './routes/workflow-dispatch'
+import { requireAdmin, requireAuth } from './middleware/auth'
 
 const app = express()
 const port = Number.parseInt(process.env.PORT || '3001', 10)
 const timezone = process.env.CRON_TIMEZONE || 'Asia/Kolkata'
 const schedulerEnabled = process.env.ENABLE_SCHEDULER !== 'false'
-const runInitialScrape = process.env.RUN_INITIAL_SCRAPE !== 'false'
+// A process restart must not silently consume discovery credits.
+const runInitialScrape = process.env.RUN_INITIAL_SCRAPE === 'true'
 const runningJobs = new Set<string>()
 const frontendDirectory = path.resolve(process.cwd(), 'public')
 
@@ -87,12 +89,16 @@ app.use(cors({
 }))
 app.use(express.json({ limit: '2mb' }))
 
+// Telegram cannot send a Supabase session; its webhook verifies its own secret.
+app.use('/api/telegram', telegramWebhookRoutes)
+// All browser/API traffic is authenticated before route code gets a request-scoped
+// Supabase client. This prevents the service key from bypassing RLS on behalf of users.
+app.use('/api', requireAuth)
 app.use('/api/resume', resumeRoutes)
 app.use('/api/jd', jdRoutes)
 app.use('/api/resume', resumeEditRoutes)
 app.use('/api/resume', resumeCompileRoutes)
 app.use('/api/apply', applyIntentRoutes)
-app.use('/api/telegram', telegramWebhookRoutes)
 app.use('/api/scrapers', scraperHealthRoutes)
 app.use('/api/opportunities', opportunityRoutes)
 app.use('/api/opportunities', deduplicationRoutes)
@@ -149,14 +155,14 @@ async function runJob(name: string, job: () => Promise<unknown>) {
   }
 }
 
-app.post('/trigger-scrape', async (_req, res) => {
+app.post('/trigger-scrape', requireAuth, requireAdmin, async (_req, res) => {
   const started = await runJob('internship-scrape', startScrapers)
   res.status(started ? 200 : 409).json({
     message: started ? 'Internship scraping completed' : 'Internship scraper is already running',
   })
 })
 
-app.post('/trigger-hackathons', async (_req, res) => {
+app.post('/trigger-hackathons', requireAuth, requireAdmin, async (_req, res) => {
   const started = await runJob('hackathon-scrape', runHackathonScrapers)
   res.status(started ? 200 : 409).json({
     message: started ? 'Hackathon scraping completed' : 'Hackathon scraper is already running',
@@ -179,14 +185,15 @@ function setupCronJobs() {
     return
   }
 
-  schedule('internship-scrape', process.env.INTERNSHIP_CRON || '*/10 * * * *', startScrapers)
-  schedule('hackathon-scrape', process.env.HACKATHON_CRON || '5-59/10 * * * *', runHackathonScrapers)
+  schedule('internship-scrape', process.env.INTERNSHIP_CRON || '17 */6 * * *', startScrapers)
+  schedule('hackathon-scrape', process.env.HACKATHON_CRON || '47 8,20 * * *', runHackathonScrapers)
   schedule('daily-digest', process.env.DIGEST_CRON || '0 9 * * *', sendDailyDigest)
   schedule('deadline-check', process.env.DEADLINE_CRON || '0 8 * * *', checkDeadlines)
   schedule('follow-up-check', process.env.FOLLOW_UP_CRON || '0 10 * * *', checkFollowUps)
   schedule('deduplication', process.env.DEDUPLICATION_CRON || '0 2 * * 0', async () => {
     const response = await fetch(`http://127.0.0.1:${port}/api/opportunities/deduplicate`, {
       method: 'POST',
+      headers: { 'x-internal-job-secret': process.env.INTERNAL_JOB_SECRET || '' },
     })
     if (!response.ok) throw new Error(`Deduplication returned HTTP ${response.status}`)
   })

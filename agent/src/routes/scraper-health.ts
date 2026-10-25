@@ -1,7 +1,8 @@
 import { Router } from 'express'
-import { supabase } from '../config/supabase'
+import { serviceSupabase } from '../config/supabase'
 import { runHackathonScrapers } from '../scheduler/hackathon-jobs'
 import { startScrapers } from '../scheduler/jobs'
+import { requireAdmin } from '../middleware/auth'
 
 const router = Router()
 
@@ -10,7 +11,7 @@ const router = Router()
 router.get('/health', async (req, res) => {
   try {
     // Get latest run for each scraper
-    const { data: runs } = await supabase
+    const { data: runs } = await serviceSupabase
       .from('scraper_runs')
       .select('*')
       .order('ran_at', { ascending: false })
@@ -47,7 +48,7 @@ router.get('/health', async (req, res) => {
 
 // POST /api/scrapers/run
 // Manually trigger a specific scraper
-router.post('/run', async (req, res) => {
+router.post('/run', requireAdmin, async (req, res) => {
   try {
     const { scraper } = req.query
 
@@ -74,7 +75,7 @@ router.post('/run', async (req, res) => {
       const duration = Date.now() - startTime
 
       // Log the run
-      await supabase.from('scraper_runs').insert({
+      await serviceSupabase.from('scraper_runs').insert({
         scraper_name: scraper,
         new_count: newCount,
         duration_ms: duration,
@@ -91,7 +92,7 @@ router.post('/run', async (req, res) => {
     } catch (err) {
       error = err instanceof Error ? err.message : 'Unknown error'
       
-      await supabase.from('scraper_runs').insert({
+      await serviceSupabase.from('scraper_runs').insert({
         scraper_name: scraper,
         error_message: error,
         duration_ms: Date.now() - startTime,

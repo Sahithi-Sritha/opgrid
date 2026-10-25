@@ -1,323 +1,88 @@
-# 🎯 OpGrid - Opportunity Aggregator
+# OpGrid
 
-> **Never miss an internship opportunity again.** OpGrid automatically scrapes jobs from multiple sources, intelligently tags them, and sends you notifications — running 24/7 for free.
+OpGrid is a student-focused opportunity dashboard for finding public internship, hackathon, fellowship, and competition listings, then saving and tracking applications. It is an early beta: listings are collected from public sources and should always be verified at the original URL.
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![TypeScript](https://img.shields.io/badge/TypeScript-5.0-blue)](https://www.typescriptlang.org/)
-[![Next.js](https://img.shields.io/badge/Next.js-14-black)](https://nextjs.org/)
+## What works today
 
-## ✨ Features
+- Supabase email/password registration, sign-in, session restoration, sign-out, and password-reset email.
+- A responsive feed, deadline dashboard, saved listings, and application tracker.
+- Source-specific scrapers plus Firecrawl discovery for public opportunity pages, with canonical-URL deduplication.
+- Per-user records protected with Supabase RLS: applications, resumes, analyses, notifications, saved listings, custom sources, and seen state.
+- Optional email/Telegram notifications and an optional resume/JD keyword-analysis workflow.
 
-### 🔍 **Multi-Source Scraping**
-Automatically monitors:
-- LinkedIn Jobs
-- Wellfound (AngelList Talent)
-- Y Combinator Jobs
-- Telegram intern groups
-- Company career pages (Stripe, Airbnb, Figma, etc.)
+## Important limits
 
-### 🏷️ **AI-Powered Auto-Tagging**
-Amazon Bedrock (Claude 3 Haiku) automatically detects:
-- `internship` - Is this an internship position?
-- `remote` - Remote work available?
-- `stipend` - Compensation mentioned?
-- `OA` - Online assessment required?
-- `referral` - Referral bonus offered?
+- OpGrid does not confirm a student's eligibility. It preserves the source URL and does not treat a match as a guarantee.
+- Discovery and classification can fail due to source changes, access controls, rate limits, or model/provider limits.
+- Resume scoring is experimental and is not an ATS prediction or hiring recommendation.
+- The resume UI includes prototype elements; do not enable resume uploads in a public beta until the storage policy and retention plan are reviewed.
 
-### 📧 **Smart Notifications**
-- **Daily Email Digest** - New opportunities at 9 AM
-- **Telegram Alerts** - Instant notifications
-- **Deadline Reminders** - Alert 3 days before closing
-- **PWA Support** - Install as mobile app
+## Architecture
 
-### 📊 **Application Tracker**
-- Full pipeline tracking (Applied → OA → Interview → Offer)
-- Resume version management
-- Referral tracking
-- Follow-up reminders
-- Personal notes
+```
+Next.js browser UI ── bearer token ──> Express API ──> Supabase Postgres/Auth/Storage
+                                         │
+                                  scheduled source scrapers
+                                         │
+                              optional Gemini or Bedrock classifier
+```
 
-### 📄 **Resume Analyzer** *(Coming Soon)*
-- AI-powered resume-JD matching
-- Keyword gap analysis
-- Match score calculation
-- Personalized improvement suggestions
+The Express API verifies every browser token. User requests use an RLS-bound Supabase client; the service-role client is reserved for trusted jobs.
 
----
+## Local setup
 
-## 🚀 Quick Start
-
-Get OpGrid running locally in **under 10 minutes**:
+Prerequisites: Node 22, a Supabase project, and optionally Gemini, AWS Bedrock, Resend, Apify, or Telegram credentials.
 
 ```bash
-# 1. Install dependencies
-cd frontend && npm install
-cd ../agent && npm install
-
-# 2. Setup Supabase (create project at supabase.com)
-# Copy schema.sql into Supabase SQL Editor and run
-
-# 3. Configure environment
 cp frontend/.env.example frontend/.env.local
 cp agent/.env.example agent/.env
-# Edit both files with your credentials
-
-# 4. Run!
-cd frontend && npm run dev  # Terminal 1 - Frontend on :3000
-cd agent && npm run dev     # Terminal 2 - Agent on :3001
+cd frontend && npm ci
+cd ../agent && npm ci
 ```
 
-📖 **Detailed Guide**: See [QUICKSTART.md](QUICKSTART.md)
+1. In Supabase Auth, enable Email/Password and add `http://localhost:3000/auth/sign-in` to redirect URLs.
+2. Run [schema.sql](schema.sql), [schema-migration-resume-engine.sql](schema-migration-resume-engine.sql), [schema-migration-auth-rls.sql](schema-migration-auth-rls.sql), then [schema-migration-resume-security.sql](schema-migration-resume-security.sql) in the Supabase SQL editor.
+3. Set the values described in the two example environment files. `SUPABASE_SERVICE_KEY`, `INTERNAL_JOB_SECRET`, provider tokens, and GitHub PATs belong only in `agent/.env` or server hosting settings.
+4. Run `npm run dev` in `frontend/` and `agent/` separately.
 
----
+## Validation
 
-## 🏗️ Architecture
-
-```
-┌─────────────┐
-│   Browser   │  Next.js frontend (Vercel)
-└──────┬──────┘
-       │
-       ▼
-┌─────────────┐
-│  Supabase   │  PostgreSQL database + auth
-└──────▲──────┘
-       │
-       ▼
-┌─────────────────────────────────────┐
-│         Agent (Railway/Render)       │
-│  ┌──────────┐  ┌──────────────┐    │
-│  │ Scrapers │→ │  Classifier  │────┼──→ Amazon Bedrock
-│  └──────────┘  │  (AI-powered)│    │    (Claude 3 Haiku)
-│                 └──────┬───────┘    │
-│  ┌──────────┐         │             │
-│  │Scheduler │  ┌──────▼───────┐    │
-│  │(Cron)    │  │  Notifier    │    │
-│  └──────────┘  │ Email+Telegram│    │
-│                 └──────────────┘    │
-└─────────────────────────────────────┘
-```
-
-**Data Flow**:
-1. Cron triggers scrapers every 6 hours
-2. **Amazon Bedrock (Claude AI)** tags and extracts metadata
-3. New opportunities saved to Supabase
-4. Notifications sent via email/Telegram
-5. Users browse feed and track applications
-
-📐 **Detailed Architecture**: See [ARCHITECTURE.md](ARCHITECTURE.md)
-
----
-
-## 🛠️ Tech Stack
-
-| Layer | Technology | Why |
-|-------|-----------|-----|
-| **Frontend** | Next.js 14 + TypeScript + Tailwind | Server components, great DX |
-| **Backend** | Express + node-cron | Lightweight, reliable scheduling |
-| **Database** | Supabase (PostgreSQL) | Managed, real-time, built-in auth |
-| **AI** | Amazon Bedrock (Claude 3 Haiku) | AWS Free Tier, best text understanding |
-| **Email** | Resend | Developer-friendly API |
-| **Notifications** | Telegram Bot | Instant push, no app needed |
-| **Scraping** | Axios + Cheerio + Puppeteer | HTML parsing + JS rendering |
-
----
-
-## 📁 Project Structure
-
-```
-opgrid/
-├── frontend/                # Next.js application
-│   ├── app/
-│   │   ├── feed/           # Opportunity feed page
-│   │   ├── tracker/        # Application tracker
-│   │   ├── resume/         # Resume analyzer
-│   │   └── settings/       # User preferences
-│   ├── components/         # Reusable UI components
-│   └── lib/supabase.ts     # Database client
-│
-├── agent/                  # Background scraping worker
-│   └── src/
-│       ├── scrapers/       # Source-specific scrapers
-│       │   ├── linkedin.ts
-│       │   ├── wellfound.ts
-│       │   ├── yc.ts
-│       │   ├── telegram.ts
-│       │   └── career-pages.ts
-│       ├── classifier/     # AI tagging
-│       │   └── tagger.ts
-│       ├── notifier/       # Notification handlers
-│       │   ├── email.ts
-│       │   └── telegram.ts
-│       ├── scheduler/      # Cron jobs
-│       │   ├── jobs.ts
-│       │   └── deadlines.ts
-│       └── index.ts        # Main entry point
-│
-├── schema.sql              # Supabase database schema
-├── QUICKSTART.md           # 10-minute setup guide
-├── DEPLOYMENT.md           # Production deployment
-├── ARCHITECTURE.md         # System design
-└── TODO.md                 # Feature roadmap
-```
-
----
-
-## 📊 Database Schema
-
-### `opportunities`
-Core table storing all scraped opportunities
-```sql
-- id, title, company, source, url (unique)
-- description, tags[], deadline, stipend
-- location, is_remote, raw_html
-- created_at, seen_at
-```
-
-### `applications`
-User application tracking
-```sql
-- id, opportunity_id (FK)
-- applied_date, status, resume_version
-- referral_name, follow_up_sent, notes
-```
-
-### `resume_analyses`
-AI-powered resume matching
-```sql
-- id, jd_text, resume_text
-- missing_keywords[], present_keywords[]
-- match_score, suggestions
-```
-
-### `notif_log`
-Notification audit trail
-```sql
-- id, type (email|telegram|push)
-- payload (jsonb), sent_at
-```
-
----
-
-## 🌐 Deployment
-
-### Frontend (Vercel)
-```bash
-cd frontend
-vercel --prod
-```
-
-### Agent (Railway)
 ```bash
 cd agent
-railway up
+npm run build
+npm run test:identity
+
+cd ../frontend
+npx tsc --noEmit
+npm run build
 ```
 
-### Database (Supabase)
-Already hosted! Just run `schema.sql` in SQL Editor.
+The legacy `frontend` `npm run lint` command is not compatible with Next 16; run `npx eslint app components lib` until that script is updated.
 
-📦 **Full Deployment Guide**: See [DEPLOYMENT.md](DEPLOYMENT.md)
+## Discovery cost guardrails
 
----
+The defaults run source scraping every six hours and Firecrawl discovery twice daily. Firecrawl is capped at five scraped search results per run; the deterministic deduplicator does not call an LLM. Startup discovery is off by default so a process restart cannot consume credits. For a 10–20 tester beta, monitor failures and credit consumption before increasing either cap or frequency.
 
-## 💰 Cost Breakdown
+Firecrawl discovery uses one targeted search plus five scraped results per run. At two runs/day, its expected usage is roughly 420 credits/month (about two search credits plus five page credits per run), under its current 1,000-credit free tier. Keep `FIRECRAWL_SEARCH_LIMIT` at five until actual usage has been measured.
 
-| Service | Free Tier | Paid | Monthly Cost |
-|---------|-----------|------|--------------|
-| Vercel | ✅ Yes | Pro | $0-20 |
-| Railway | $5 credit | Pro | $5-10 |
-| Supabase | ✅ Yes | Pro | $0-25 |
-| Resend | 100 emails/day | Pro | $0-10 |
-| Amazon Bedrock | $200 credits (2mo) | Pay-per-use | $0-10 |
-| **Total** | **~$10/mo** | **Full** | **$50-60/mo** |
+HackerAgentRank was also evaluated but is not integrated. It is a separate FastAPI/Next.js/local-model system and would add disproportionate deployment and privacy complexity. Its own disclaimer says it is not an ATS or hiring decision system.
 
-Most students can run this **under $15/month** on free/starter tiers.
+## Deployment and beta checklist
 
----
+Use the existing Docker/Render configuration, or deploy the frontend and API separately. Configure all server secrets in the host; never commit them. Apply RLS before inviting users, create two test accounts, and verify that each cannot read or update the other's records.
 
-## 🤝 Contributing
+For the first beta cohort, invite 10–20 students, explain that results are public listings rather than eligibility guarantees, and provide the issue template for problems. Keep `ENABLE_SCHEDULER=false` on the free Render service and use the included GitHub Actions schedule only after storing its required secrets.
 
-We welcome contributions! Here's how:
+### Resume Studio configuration
 
-1. **Add a new scraper**: See [CONTRIBUTING.md](CONTRIBUTING.md)
-2. **Report bugs**: Open an issue with details
-3. **Suggest features**: Check [TODO.md](TODO.md) first
-4. **Submit PRs**: Fork, create branch, submit PR
+The Resume Studio stores named LaTeX sources and versions under the authenticated user. HackerAgentRank feedback is optional and requires a private deployment of its FastAPI service plus `HACKER_AGENT_RANK_URL` (and, if enabled there, `HACKER_AGENT_RANK_API_KEY`) in the agent environment. Its upstream API is localhost-oriented; do not expose it directly to browsers.
 
----
+PDF compilation is intentionally disabled in this deployment until a resource-limited sandbox service is provided. Do not enable the legacy in-process `pdflatex` compiler for untrusted user LaTeX. The Studio therefore supports source editing, safe persistence, version lineage, and feedback today, but not compiled-PDF download yet.
 
-## 📚 Documentation
+## Contributing
 
-- 🚀 [QUICKSTART.md](QUICKSTART.md) - Get running in 10 minutes
-- 📦 [DEPLOYMENT.md](DEPLOYMENT.md) - Production deployment guide
-- 🏗️ [ARCHITECTURE.md](ARCHITECTURE.md) - System design & tech decisions
-- 🤝 [CONTRIBUTING.md](CONTRIBUTING.md) - How to contribute
-- 📋 [TODO.md](TODO.md) - Feature roadmap
-- 📊 [PROJECT_SUMMARY.md](PROJECT_SUMMARY.md) - Complete overview
+See [CONTRIBUTING.md](CONTRIBUTING.md). Do not add a scraper without respecting the source's terms, robots guidance, and rate limits. Do not add secrets, resumes, personal data, or generated output to a pull request.
 
----
+## License
 
-## 🎓 Use Cases
-
-- **Students**: Aggregate internships from all sources
-- **New Grads**: Track full-time new grad positions
-- **Career Switchers**: Monitor specific companies
-- **Recruiters**: Competitive intelligence
-- **Researchers**: Job market trend data
-
----
-
-## 🔮 Roadmap
-
-- [x] Multi-source scraping
-- [x] AI-powered tagging
-- [x] Email + Telegram notifications
-- [x] Application tracker
-- [ ] User authentication
-- [ ] Resume analyzer (AI-powered)
-- [ ] Browser extension
-- [ ] Mobile app (React Native)
-- [ ] More scrapers (Indeed, Glassdoor, Handshake)
-- [ ] Cover letter generator
-- [ ] Interview prep resources
-
-See full list in [TODO.md](TODO.md)
-
----
-
-## 📜 License
-
-MIT License - free to use, modify, and distribute.
-
-See [LICENSE](LICENSE) for details.
-
----
-
-## 🙏 Acknowledgments
-
-Built with:
-- [Next.js](https://nextjs.org/) - React framework
-- [Supabase](https://supabase.com/) - Database & auth
-- [Amazon Bedrock](https://aws.amazon.com/bedrock/) - AI classification (Claude 3 Haiku)
-- [Resend](https://resend.com/) - Email API
-- [Cheerio](https://cheerio.js.org/) - HTML parsing
-
----
-
-## 🚨 Disclaimer
-
-This tool is for **personal use** only. Always:
-- Respect website Terms of Service
-- Follow robots.txt
-- Use rate limiting
-- Avoid commercial scraping without permission
-
----
-
-<div align="center">
-
-**Built for the job search grind. Open source. Actually useful.** 🎯
-
-[Get Started](QUICKSTART.md) • [Deploy](DEPLOYMENT.md) • [Contribute](CONTRIBUTING.md)
-
-</div>
+[MIT](LICENSE). Confirm that all contributors have the right to submit their code before accepting external contributions.
